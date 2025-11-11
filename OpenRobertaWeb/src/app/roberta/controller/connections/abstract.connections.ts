@@ -45,7 +45,13 @@ export abstract class AbstractConnection implements ConnectionInterface {
     }
 
     public runOnBrick(configName: string, xmlTextProgram: string, xmlConfigText: string): void {
+        //PROGRAM handles Rest calls related to program operations (save, delete, share, show source code,
+        //run the program)
+        //when using runNative (running source code python), it calls COMM with a POST method
+        //runNative is also defined in OpenRobertaServer\src\main\java\de\fhg\iais\roberta\javaServer\restServices\all\controller\ProjectWorkflowRestController.java
         PROGRAM.runOnBrick(
+            //GUISTATE seems to be the 'state' of the graphical user interface
+            //interracts a lot with the xml, keeps track of the robot
             GUISTATE_C.getProgramName(),
             configName,
             xmlTextProgram,
@@ -59,6 +65,29 @@ export abstract class AbstractConnection implements ConnectionInterface {
                 PROG_C.reloadProgram(result);
             }
         );
+    }
+
+    //newmethod
+    //COMM in this class seems to be a REST interface
+    //so maybe we can add our own and call it here?
+    public newRunBrick(configName: string, xmlTextProgram: string, xmlConfigText: string): void {
+        PROGRAM.newRunBrick(
+            //GUISTATE seems to be the 'state' of the graphical user interface
+            //interracts a lot with the xml, keeps track of the robot
+            GUISTATE_C.getProgramName(),
+            configName,
+            xmlTextProgram,
+            xmlConfigText,
+            PROG_C.getSSID(),
+            PROG_C.getPassword(),
+            GUISTATE_C.getLanguage(),
+            (result) => {
+                /*GUISTATE_C.setState(result);
+                this.run(result);
+                PROG_C.reloadProgram(result);*/
+            }
+        );
+        
     }
 
     public stopProgram(): void {

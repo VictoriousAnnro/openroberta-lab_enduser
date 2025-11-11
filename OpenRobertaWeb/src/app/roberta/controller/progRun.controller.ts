@@ -5,8 +5,12 @@ import * as $ from 'jquery';
 import * as Blockly from 'blockly';
 import * as CONNECTION_C from 'connection.controller';
 import * as GUISTATE from 'guiState.model';
+//newmethod
+//import axios from 'axios';
 
 let blocklyWorkspace;
+//newmethod
+const BASE_URL = "http://127.0.0.1:5000";
 
 function init(workspace) {
     blocklyWorkspace = GUISTATE_C.getBlocklyWorkspace();
@@ -14,6 +18,13 @@ function init(workspace) {
 }
 
 function initEvents() {
+    //newmethod
+    Blockly.bindEvent_(blocklyWorkspace.robControls.newRunBrick, 'mousedown', null, function (e) {
+        console.info('new run brick clicked!!');
+        let resp = newRunBrick();
+        console.info(resp);
+        return false;
+    });
     Blockly.bindEvent_(blocklyWorkspace.robControls.runOnBrick, 'mousedown', null, function (e) {
         if ($('#runOnBrick').hasClass('disabled')) {
             let notificationElement = $('#releaseInfo');
@@ -86,8 +97,43 @@ function runOnBrick(opt_program?) {
     GUISTATE_C.setPing(ping);
 }
 
+//newmethod
+/*This may be scuffed as fuck, but it's very difficult to figure out the architecture
+of openRoberta well enough to follow it, so this will have to do */
+async function newRunBrick(){
+    /**This method should launch the viewer
+     * TODO: figure out how to get the blocks in stack, call relevant api for them
+     */
+    const apiUrl = 'http://127.0.0.1:5000/'; // Flask app URL
+
+    //CURRENTLY DOESNT WORK!?
+
+    try {
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.error) {
+      return `Error from Python: ${data.error}`;
+    }
+
+    return data.result;
+    } catch (error) {
+        return `An error occurred: ${error}`;
+    }
+}
+
 async function stopProgram() {
     CONNECTION_C.getConnectionInstance().stopProgram();
 }
 
-export { init, runNative, runOnBrick };
+export { init, runNative, runOnBrick, newRunBrick };

@@ -250,6 +250,16 @@ public class ProjectWorkflowRestController {
         }
     }
 
+    //newmethod
+    @POST
+    @Path("/newRun")
+    public void newRun(){
+        //launch_viewer from robot API
+        //Returns:  dictionary: Status message {"status": "success"|"already_running", "message": "..."}
+        //How to call python methods from java? 
+        
+    }
+
     @POST
     @Path("/compileNative")
     @Consumes(MediaType.APPLICATION_JSON)

@@ -3,6 +3,10 @@ export interface ConnectionInterface {
 
     terminate(): void;
 
+    //newmethod
+    //we prolly don't need all these parameters
+    newRunBrick(configName: string, xmlTextProgram: string, xmlConfigText: string): void;
+
     runOnBrick(configName: string, xmlTextProgram: string, xmlConfigText: string): void;
 
     runNative(sourceCode: string): void;
