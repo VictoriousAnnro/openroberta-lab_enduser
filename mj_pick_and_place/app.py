@@ -7,10 +7,21 @@ from flask import Flask, jsonify, request
 from robot_api import robot
 import time
 from flask_cors import CORS, cross_origin
+import threading
 
 app = Flask(__name__)
-cors = CORS(app, resources={r"/api/*": {"origins": "http://localhost:1999/"}})
+#cors = CORS(app, resources={r"/api/*": {"origins": "http://localhost:1999/"}})
+cors = CORS(app, origins=["http://localhost:1999/"])
 app.config['CORS_HEADERS'] = 'Content-Type'
+
+simulator_thread = None # Thread running simulator loop
+
+@app.after_request
+def handle_options(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Requested-With"
+    return response
 
 @app.route("/", methods = ['GET'])
 @cross_origin() #not sure if needed
@@ -23,7 +34,7 @@ def helloWorld():
     return robot.initialize()
 # this seems to work! It launches the viewer at least, but also gives an error/warning in console.log. Now I need to test if the step loop works!!
 
-# DONT USE THIS!!
+# Launch viewer (no simulator loop)
 @app.route("/viewer", methods = ['GET'])
 def launch_view():
     # Launch viewer
@@ -38,34 +49,105 @@ def launch_view():
 @app.route("/runProgram", methods = ['GET'])
 @cross_origin()
 def runProg():
-    # Launch viewer
-    robot.launch_viewer()
-    # Reset robot to home position
-    robot.initialize()
+    time.sleep(3)
+    print("waited 3 sec")
     # Call the continous loop
     while robot.viewer.is_running(): #Until the user closes the window
         robot.step_simulation() #We execute one timestep
         time.sleep(robot.model.opt.timestep) #Maintain it real-time
 
-# Whats the best way to get the parameters???
+def bitch():
+    # Reset robot to home position
+    #reset = robot.initialize()
+
+    # Launch viewer (wait for method to return)
+    launch = robot.launch_viewer()
+
+    def simulator_loop():
+        # Call the continous loop
+        while robot.viewer.is_running(): #Until the user closes the window
+            robot.step_simulation() #We execute one timestep
+            time.sleep(robot.model.opt.timestep) #Maintain it real-time
+
+    #simulator loop in a background thread
+    simulator_thread = threading.Thread(target=simulator_loop, daemon=True)
+    #self.viewer_thread.start()
+    if(launch["status"]=="success"):
+        time.sleep(3)  # 2s delay
+
+        # Reset robot to home position
+        #reset = robot.initialize()
+        #print(reset["status"])
+
+        #time.sleep(4)  # 1s delay
+
+        # Call the continous loop in a thread
+        simulator_thread.start()
+
+        # Reset robot to home position
+        #robot.initialize()
+
+    return launch
+
+def runSimLoop(result):
+    if result["status"] == "success":
+        # Now execute the movement
+        print(robot.current_trajectory)
+        while len(robot.current_trajectory) > 0:
+            print("bitch")
+            robot.step_simulation()
+            time.sleep(robot.model.opt.timestep)  # Usually 0.005s
+
 
 # move_to_position(x, y, z, duration) -> Move end-effector to XYZ coordinates
-@app.route("/move_pos/<int:x>/<int:y>/<int:z>/<int:duration>", methods = ['GET'])
-def move_to_pos(x, y, z, duration):
-    return robot.move_to_position(x, y, z, duration)
+@app.route("/move_pos/<int:x>/<int:y>/<int:z>", methods = ['GET'])
+def move_to_pos(x, y, z):
+    print("you")
+    result = robot.move_to_position(x/100,y/100,z/100)
+    print("fuck")
+    print(result["status"])
+    print(result["message"])
+
+    runSimLoop(result)
+
+    """if result["status"] == "success":
+        # Now execute the movement
+        print(robot.current_trajectory)
+        while len(robot.current_trajectory) > 0:
+            print("bitch")
+            robot.step_simulation()
+            time.sleep(robot.model.opt.timestep)  # Usually 0.005s"""
+    return result
     # move_to_position returns one of these messages
     # return {"status": "success", "message": f"Moving to ({x}, {y}, {z})"}
     # return {"status": "error", "message": str(e)}
 
 # move_to_object(name, height_offset) -> Move above an object
-@app.route("/move_obj/<string:name>/<int:height_offset>", methods = ['GET'])
-def move_to_obj(name, height_offset):
-    return robot.move_to_object(name, height_offset)
+@app.route("/move_obj/<string:name>", methods = ['GET'])
+def move_to_obj(name):
+    result = robot.move_to_object(name)
+    print(result["status"])
+    print(result["message"])
+
+    runSimLoop(result)
+
+    """if result["status"] == "success":
+        # Now execute the movement
+        print(robot.current_trajectory)
+        while len(robot.current_trajectory) > 0:
+            robot.step_simulation()
+            time.sleep(robot.model.opt.timestep)  # Usually 0.005s"""
+    return result
+    #return robot.move_to_object(name)
 
 # pick_object(name) -> Complete pick sequence (move down, grasp, move up the object)
 @app.route("/pick_obj/<string:name>", methods = ['GET'])
 def pick_obj(name):
-    return robot.pick_object(name)
+    result = robot.pick_object(name)
+    print(result["status"])
+    print(result["message"])
+    runSimLoop(result)
+    return result #robot.pick_object(name)
 
 # grasp() ->Closes the gripper
 @app.route("/grasp", methods = ['GET'])

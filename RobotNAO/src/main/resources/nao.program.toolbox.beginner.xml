@@ -27,10 +27,10 @@
             </value>
         </block>
         <block type="naoActions_moveToObject">
-            <field name="OBJECT">RED_OBJECT</field>
+            <field name="OBJECT">red_box</field>
         </block>
         <block type="naoActions_pickObject">
-            <field name="OBJECT">RED_OBJECT</field>
+            <field name="OBJECT">red_box</field>
         </block>
         <block type="naoActions_grasp"/>
         <block type="naoActions_release"/>
