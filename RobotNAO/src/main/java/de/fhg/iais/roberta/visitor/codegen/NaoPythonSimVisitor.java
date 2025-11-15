@@ -18,6 +18,12 @@ import de.fhg.iais.roberta.syntax.action.light.LedAction;
 import de.fhg.iais.roberta.syntax.action.light.RgbLedOnAction;
 //newmethod
 import de.fhg.iais.roberta.syntax.action.nao.ATesting;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToPos;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToObj;
+import de.fhg.iais.roberta.syntax.action.nao.PickObj;
+import de.fhg.iais.roberta.syntax.action.nao.Grasp;
+import de.fhg.iais.roberta.syntax.action.nao.Release;
+//-------------
 import de.fhg.iais.roberta.syntax.action.nao.Animation;
 import de.fhg.iais.roberta.syntax.action.nao.ApplyPosture;
 import de.fhg.iais.roberta.syntax.action.nao.Autonomous;
@@ -293,6 +299,53 @@ public final class NaoPythonSimVisitor extends AbstractPythonVisitor implements 
         this.src.add(")");
         return null;
     }
+
+    @Override
+    public Void visitMoveToPos(MoveToPos MoveToPos){
+        this.src.add("move_to_position(robot, ");
+        //this adds the inputs to string?
+        MoveToPos.x.accept(this);
+        this.src.add(", ");
+
+        MoveToPos.y.accept(this);
+        this.src.add(", ");
+
+        MoveToPos.z.accept(this);
+        this.src.add(", ");
+
+        MoveToPos.duration.accept(this);
+        this.src.add(")");
+
+        return null;
+    }
+
+    @Override
+    public Void visitMoveToObj(MoveToObj MoveToObj){
+        this.src.add("move_to_object(robot, \"", MoveToObj.objectName, "\")");
+
+        return null;
+    }
+
+    @Override
+    public Void visitPickObj(PickObj PickObj){
+        this.src.add("pick_object(robot, \"", PickObj.objectName, "\")");
+
+        return null;
+    }
+
+    @Override
+    public Void visitGrasp(Grasp Grasp){
+        this.src.add("grasp(robot)");
+        return null;
+    }
+
+    @Override
+    public Void visitRelease(Release Release){
+        this.src.add("release(robot)");
+        return null;
+    }
+
+    //------------
 
     @Override
     public Void visitWalkDistance(WalkDistance walkDistance) {

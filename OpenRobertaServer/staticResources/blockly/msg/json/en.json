@@ -548,7 +548,7 @@
 	"COLOUR_SEGMENT": "colour segment",
 	"COLOUR_HSV_RANGE": "HSV range",
 	"COLOUR_THRESHOLD": "colour threshold",
-	"WAIT": "wait ms",
+	"WAIT": "wait seconds",
 	"WAIT_OR": "or wait for",
 	"SENSOR_ULTRASONIC": "ultrasonic sensor",
 	"SENSOR_ULTRASONIC_ARDUINO": "ultrasonic sensor HC-SR04",

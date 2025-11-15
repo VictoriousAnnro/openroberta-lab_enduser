@@ -3,5 +3,5 @@ numpy<2.0.0
 roboticstoolbox-python
 spatialmath-python
 robot_descriptions
-flask
-Flask-cors
+Flask
+flask-cors

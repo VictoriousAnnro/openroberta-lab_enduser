@@ -4,16 +4,24 @@
 
 # https://www.geeksforgeeks.org/python/python-build-a-rest-api-using-flask/
 from flask import Flask, jsonify, request
-from flask_cors import CORS, cross_origin
 from robot_api import robot
 import time
+from flask_cors import CORS, cross_origin
 
 app = Flask(__name__)
-CORS(app)
+cors = CORS(app, resources={r"/api/*": {"origins": "http://localhost:1999/"}})
+app.config['CORS_HEADERS'] = 'Content-Type'
 
 @app.route("/", methods = ['GET'])
+@cross_origin() #not sure if needed
 def helloWorld():
-    return "hello world yaaaay"
+    #return jsonify({'text': "hello world yaay"})
+    #return "hello world yaaay"
+    robot.launch_viewer()
+
+    # Reset robot to home position!
+    return robot.initialize()
+# this seems to work! It launches the viewer at least, but also gives an error/warning in console.log. Now I need to test if the step loop works!!
 
 # DONT USE THIS!!
 @app.route("/viewer", methods = ['GET'])
@@ -28,6 +36,7 @@ def launch_view():
 # I think we need to have this called once as separate thread
 # like, it needs to NOT block the calls we then make to the other methods
 @app.route("/runProgram", methods = ['GET'])
+@cross_origin()
 def runProg():
     # Launch viewer
     robot.launch_viewer()
@@ -81,5 +90,6 @@ if __name__ == '__main__':
 
 # To run:
 # flask --app app.py run
+# or just flask run ?
 
 # curl http://127.0.0.1:5000/<method_name>

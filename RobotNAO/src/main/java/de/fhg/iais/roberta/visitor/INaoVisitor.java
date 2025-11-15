@@ -26,6 +26,11 @@ import de.fhg.iais.roberta.syntax.action.nao.TurnDegrees;
 import de.fhg.iais.roberta.syntax.action.nao.WalkAsync;
 //newMethod
 import de.fhg.iais.roberta.syntax.action.nao.ATesting;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToPos;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToObj;
+import de.fhg.iais.roberta.syntax.action.nao.PickObj;
+import de.fhg.iais.roberta.syntax.action.nao.Grasp;
+import de.fhg.iais.roberta.syntax.action.nao.Release;
 //----------
 import de.fhg.iais.roberta.syntax.action.nao.WalkDistance;
 import de.fhg.iais.roberta.syntax.action.nao.WalkTo;
@@ -75,6 +80,16 @@ public interface INaoVisitor<V> extends IVisitor<V> {
 
     // newMethod
     V visitATesting(ATesting test);
+
+    V visitMoveToPos(MoveToPos moveToPos);
+
+    V visitMoveToObj(MoveToObj moveToObj);
+
+    V visitPickObj(PickObj pickObj);
+
+    V visitGrasp(Grasp grasp);
+
+    V visitRelease(Release release);
     //--------------
 
     V visitTurnDegrees(TurnDegrees turnDegrees);

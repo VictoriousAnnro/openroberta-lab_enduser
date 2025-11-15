@@ -23,6 +23,12 @@ import de.fhg.iais.roberta.syntax.action.nao.MoveJoint;
 import de.fhg.iais.roberta.syntax.action.nao.NaoLedOnAction;
 //newMethod
 import de.fhg.iais.roberta.syntax.action.nao.ATesting;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToPos;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToObj;
+import de.fhg.iais.roberta.syntax.action.nao.PickObj;
+import de.fhg.iais.roberta.syntax.action.nao.Grasp;
+import de.fhg.iais.roberta.syntax.action.nao.Release;
+//-----------
 import de.fhg.iais.roberta.syntax.action.nao.PlayFile;
 import de.fhg.iais.roberta.syntax.action.nao.PointLookAt;
 import de.fhg.iais.roberta.syntax.action.nao.RandomEyesDuration;
@@ -152,6 +158,39 @@ public class NaoSimValidatorAndCollectorVisitor extends NaoValidatorAndCollector
         usedMethodBuilder.addUsedMethod(NaoSimMethods.A_TEST);
         return super.visitATesting(test);
     }
+
+    @Override
+    public Void visitMoveToPos(MoveToPos MoveToPos){
+        //the NaoSimMethods needs to be added in RobotNAO\src\main\java\de\fhg\iais\roberta\visitor\NaoSimMethods.java
+        usedMethodBuilder.addUsedMethod(NaoSimMethods.MOVE_TO_POS);
+        return super.visitMoveToPos(MoveToPos);
+    }
+
+    @Override
+    public Void visitMoveToObj(MoveToObj MoveToObj){
+        usedMethodBuilder.addUsedMethod(NaoSimMethods.MOVE_TO_OBJ);
+        return super.visitMoveToObj(MoveToObj);
+    }
+
+    @Override
+    public Void visitPickObj(PickObj PickObj){
+        usedMethodBuilder.addUsedMethod(NaoSimMethods.PICK_OBJ);
+        return super.visitPickObj(PickObj);
+    }
+
+    @Override
+    public Void visitGrasp(Grasp Grasp){
+        usedMethodBuilder.addUsedMethod(NaoSimMethods.GRASP);
+        return super.visitGrasp(Grasp);
+    }
+
+    @Override
+    public Void visitRelease(Release Release){
+        usedMethodBuilder.addUsedMethod(NaoSimMethods.RELEASE);
+        return super.visitRelease(Release);
+    }
+
+    //---------------
 
     @Override
     public Void visitWalkDistance(WalkDistance walkDistance) {

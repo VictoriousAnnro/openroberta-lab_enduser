@@ -17,6 +17,12 @@ import de.fhg.iais.roberta.syntax.Phrase;
 import de.fhg.iais.roberta.syntax.action.light.LedAction;
 //newmethod
 import de.fhg.iais.roberta.syntax.action.nao.ATesting;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToPos;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToObj;
+import de.fhg.iais.roberta.syntax.action.nao.PickObj;
+import de.fhg.iais.roberta.syntax.action.nao.Grasp;
+import de.fhg.iais.roberta.syntax.action.nao.Release;
+//----------
 import de.fhg.iais.roberta.syntax.action.light.RgbLedOnAction;
 import de.fhg.iais.roberta.syntax.action.nao.Animation;
 import de.fhg.iais.roberta.syntax.action.nao.ApplyPosture;
@@ -416,6 +422,51 @@ public final class NaoPythonVisitor extends AbstractPythonVisitor implements INa
         this.src.add(")");
         return null;
     }
+
+    @Override
+    public Void visitMoveToPos(MoveToPos MoveToPos){
+        this.src.add("h.test(");
+        MoveToPos.x.accept(this);
+        this.src.add(", ");
+
+        MoveToPos.y.accept(this);
+        this.src.add(", ");
+
+        MoveToPos.z.accept(this);
+        this.src.add(", ");
+
+        MoveToPos.duration.accept(this);
+        this.src.add(")");
+        return null;
+    }
+
+    @Override
+    public Void visitMoveToObj(MoveToObj MoveToObj){
+        this.src.add("h.move_to_object(\"", MoveToObj.objectName, "\")");
+
+        return null;
+    }
+
+    @Override
+    public Void visitPickObj(PickObj PickObj){
+        this.src.add("h.pick_object(\"", PickObj.objectName, "\")");
+
+        return null;
+    }
+
+    @Override
+    public Void visitGrasp(Grasp Grasp){
+        this.src.add("h.grasp()");
+        return null;
+    }
+
+    @Override
+    public Void visitRelease(Release Release){
+        this.src.add("h.release()");
+        return null;
+    }
+
+    //-----------
 
     @Override
     public Void visitWalkDistance(WalkDistance walkDistance) {

@@ -2175,7 +2175,9 @@ Blockly.Msg.VARIABLE_Y = "store Y [";
 Blockly.Msg.VARIABLE_Z = "store Z [";
 Blockly.Msg.VOICE_PITCH = "voice pitch";
 Blockly.Msg.VOICE_SPEED = "voice speed";
-Blockly.Msg.WAIT = "wait ms";
+//newmethod
+//changed from 'ms' to 'seconds'
+Blockly.Msg.WAIT = "wait seconds"; 
 Blockly.Msg.WAIT_FOR_TOOLTIP = "Waits for sensor values.";
 Blockly.Msg.WAIT_OR = "or wait for";
 Blockly.Msg.WAIT_TIME_TOOLTIP = "Waits for a certain time in milliseconds.";

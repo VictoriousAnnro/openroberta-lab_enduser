@@ -29,4 +29,6 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+# i had to delete my old env to get flask-cors to work
+
 

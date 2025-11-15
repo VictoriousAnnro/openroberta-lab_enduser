@@ -106,7 +106,8 @@ async function newRunBrick(){
      */
     const apiUrl = 'http://127.0.0.1:5000/'; // Flask app URL
 
-    //CURRENTLY DOESNT WORK!?
+    // We need to launch viewer (figure out how to not block!)'
+    // Go through the blocks from start, and call robot method
 
     try {
     const response = await fetch(apiUrl, {

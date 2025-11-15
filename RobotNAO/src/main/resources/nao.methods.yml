@@ -25,6 +25,13 @@ A_TEST:
     def test(robot, input):
       print("test method")
 
+MOVE_TO_POS:
+  PYTHON: |
+    def move_to_position(robot, x, y, z, duration):
+      print("TODO, insert move to position method")
+
+#----------------
+
 
 WALK_DISTANCE:
   PYTHON: |

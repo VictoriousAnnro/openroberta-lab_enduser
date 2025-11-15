@@ -15,6 +15,12 @@ import de.fhg.iais.roberta.syntax.action.nao.GetLanguage;
 import de.fhg.iais.roberta.syntax.action.nao.GetVolume;
 //newmethod
 import de.fhg.iais.roberta.syntax.action.nao.ATesting;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToPos;
+import de.fhg.iais.roberta.syntax.action.nao.MoveToObj;
+import de.fhg.iais.roberta.syntax.action.nao.PickObj;
+import de.fhg.iais.roberta.syntax.action.nao.Grasp;
+import de.fhg.iais.roberta.syntax.action.nao.Release;
+//--------------
 import de.fhg.iais.roberta.syntax.action.nao.Hand;
 import de.fhg.iais.roberta.syntax.action.nao.LearnFace;
 import de.fhg.iais.roberta.syntax.action.nao.MoveJoint;
@@ -111,6 +117,38 @@ public class NaoValidatorAndCollectorVisitor extends CommonNepoValidatorAndColle
         requiredComponentVisited(test, test.input);
         return null;
     }
+
+    @Override
+    public Void visitMoveToPos(MoveToPos MoveToPos){
+        requiredComponentVisited(MoveToPos, MoveToPos.x, MoveToPos.y, MoveToPos.z,MoveToPos.duration);
+        return null;
+    }
+
+    @Override
+    public Void visitMoveToObj(MoveToObj MoveToObj){
+        requiredComponentVisited(MoveToObj);
+        return null;
+    }
+
+    @Override
+    public Void visitPickObj(PickObj PickObj){
+        requiredComponentVisited(PickObj);
+        return null;
+    }
+
+    @Override
+    public Void visitGrasp(Grasp Grasp){
+        requiredComponentVisited(Grasp);
+        return null;
+    }
+
+    @Override
+    public Void visitRelease(Release Release){
+        requiredComponentVisited(Release);
+        return null;
+    }
+
+    //----------------
 
     @Override
     public Void visitWalkDistance(WalkDistance walkDistance) {
