@@ -10,16 +10,16 @@ import de.fhg.iais.roberta.util.ast.BlocklyProperties;
 
 @NepoPhrase(name = "MOVE_TO_POS", category = "ACTOR", blocklyNames = {"naoActions_moveToPosition"})//{"naoTesting_move"})
 public final class MoveToPos extends Action {
-    @NepoValue(name = "X", type = BlocklyType.NUMBER_INT)
+    @NepoValue(name = "X", type = BlocklyType.NUMBER)
     public final Expr x;
 
-    @NepoValue(name = "Y", type = BlocklyType.NUMBER_INT)
+    @NepoValue(name = "Y", type = BlocklyType.NUMBER)
     public final Expr y;
 
-    @NepoValue(name = "Z", type = BlocklyType.NUMBER_INT)
+    @NepoValue(name = "Z", type = BlocklyType.NUMBER)
     public final Expr z;
 
-    @NepoValue(name = "DURATION", type = BlocklyType.NUMBER_INT)
+    @NepoValue(name = "DURATION", type = BlocklyType.NUMBER)
     public final Expr duration;
 
     public MoveToPos(BlocklyProperties properties, Expr x, Expr y, Expr z, Expr duration) {

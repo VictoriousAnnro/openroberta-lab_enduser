@@ -1,6 +1,5 @@
 #Using Flask, we'll make the robot_api.py methods available here through a rest API
 #In original code, we run in virtual environment. Otherwise you get problems with mujoco (cant find module)
-#How will this affect the API? Is that a problem?
 
 # https://www.geeksforgeeks.org/python/python-build-a-rest-api-using-flask/
 from flask import Flask, jsonify, request
@@ -14,8 +13,7 @@ app = Flask(__name__)
 cors = CORS(app, origins=["http://localhost:1999/"])
 app.config['CORS_HEADERS'] = 'Content-Type'
 
-simulator_thread = None # Thread running simulator loop
-
+# set headers to prevent CORS issues
 @app.after_request
 def handle_options(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -23,19 +21,9 @@ def handle_options(response):
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Requested-With"
     return response
 
-@app.route("/", methods = ['GET'])
-@cross_origin() #not sure if needed
-def helloWorld():
-    #return jsonify({'text': "hello world yaay"})
-    #return "hello world yaaay"
-    robot.launch_viewer()
-
-    # Reset robot to home position!
-    return robot.initialize()
-# this seems to work! It launches the viewer at least, but also gives an error/warning in console.log. Now I need to test if the step loop works!!
-
 # Launch viewer (no simulator loop)
 @app.route("/viewer", methods = ['GET'])
+@cross_origin()
 def launch_view():
     # Launch viewer
     robot.launch_viewer()
@@ -43,9 +31,7 @@ def launch_view():
     # Reset robot to home position!
     return robot.initialize()
 
-# this launches viewer, resets position and loops
-# I think we need to have this called once as separate thread
-# like, it needs to NOT block the calls we then make to the other methods
+# Deprecated method to run program - DONT USE
 @app.route("/runProgram", methods = ['GET'])
 @cross_origin()
 def runProg():
@@ -56,67 +42,34 @@ def runProg():
         robot.step_simulation() #We execute one timestep
         time.sleep(robot.model.opt.timestep) #Maintain it real-time
 
-def bitch():
-    # Reset robot to home position
-    #reset = robot.initialize()
-
-    # Launch viewer (wait for method to return)
-    launch = robot.launch_viewer()
-
-    def simulator_loop():
-        # Call the continous loop
-        while robot.viewer.is_running(): #Until the user closes the window
-            robot.step_simulation() #We execute one timestep
-            time.sleep(robot.model.opt.timestep) #Maintain it real-time
-
-    #simulator loop in a background thread
-    simulator_thread = threading.Thread(target=simulator_loop, daemon=True)
-    #self.viewer_thread.start()
-    if(launch["status"]=="success"):
-        time.sleep(3)  # 2s delay
-
-        # Reset robot to home position
-        #reset = robot.initialize()
-        #print(reset["status"])
-
-        #time.sleep(4)  # 1s delay
-
-        # Call the continous loop in a thread
-        simulator_thread.start()
-
-        # Reset robot to home position
-        #robot.initialize()
-
-    return launch
-
+# This runs the simulator loop
+# I couldnt make it work as a thread, so the method is called each time a trajectory is added to queue
 def runSimLoop(result):
     if result["status"] == "success":
         # Now execute the movement
-        print(robot.current_trajectory)
+        # print(robot.current_trajectory)
         while len(robot.current_trajectory) > 0:
-            print("bitch")
             robot.step_simulation()
             time.sleep(robot.model.opt.timestep)  # Usually 0.005s
+
+# This runs the simulator loop for grasp and release
+# It's dealyed a bit, to give the gripper time to physically open/close
+def runDelayedSimLoop(result):
+    if result["status"] == "success":
+        for _ in range(200): 
+            robot.step_simulation()
+            time.sleep(robot.model.opt.timestep)
 
 
 # move_to_position(x, y, z, duration) -> Move end-effector to XYZ coordinates
 @app.route("/move_pos/<int:x>/<int:y>/<int:z>", methods = ['GET'])
 def move_to_pos(x, y, z):
-    print("you")
-    result = robot.move_to_position(x/100,y/100,z/100)
-    print("fuck")
+    # CURRENTLY CANT HANDLE NEGATIVE VALUES. DO WE NEED NEGATIVES??**
+    result = robot.move_to_position((x/100),(y/100),(z/100)) #convert cm to m
     print(result["status"])
     print(result["message"])
 
     runSimLoop(result)
-
-    """if result["status"] == "success":
-        # Now execute the movement
-        print(robot.current_trajectory)
-        while len(robot.current_trajectory) > 0:
-            print("bitch")
-            robot.step_simulation()
-            time.sleep(robot.model.opt.timestep)  # Usually 0.005s"""
     return result
     # move_to_position returns one of these messages
     # return {"status": "success", "message": f"Moving to ({x}, {y}, {z})"}
@@ -130,15 +83,7 @@ def move_to_obj(name):
     print(result["message"])
 
     runSimLoop(result)
-
-    """if result["status"] == "success":
-        # Now execute the movement
-        print(robot.current_trajectory)
-        while len(robot.current_trajectory) > 0:
-            robot.step_simulation()
-            time.sleep(robot.model.opt.timestep)  # Usually 0.005s"""
     return result
-    #return robot.move_to_object(name)
 
 # pick_object(name) -> Complete pick sequence (move down, grasp, move up the object)
 @app.route("/pick_obj/<string:name>", methods = ['GET'])
@@ -147,17 +92,27 @@ def pick_obj(name):
     print(result["status"])
     print(result["message"])
     runSimLoop(result)
-    return result #robot.pick_object(name)
+    return result
 
 # grasp() ->Closes the gripper
 @app.route("/grasp", methods = ['GET'])
 def grasp():
-    return robot.grasp()
+    print('grasp')
+    result = robot.grasp()
+    print(result["status"])
+    print(result["message"])
+    runDelayedSimLoop(result)
+    return result #robot.grasp()
 
 # release() ->Opens gripper
 @app.route("/release", methods = ['GET'])
 def release():
-    return robot.release()
+    print('release')
+    result = robot.release()
+    print(result["status"])
+    print(result["message"])
+    runDelayedSimLoop(result)
+    return result #robot.release()
 
 # wait(seconds) ->Pause execution
 @app.route("/wait/<int:seconds>", methods = ['GET'])

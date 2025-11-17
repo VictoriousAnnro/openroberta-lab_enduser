@@ -451,9 +451,9 @@ class RobotAPI:
 
     def grasp(self):
         """
-        THis function close the gripper to grasp an object.vThis command executes immediately and is not queued liek the trajectory.
+        THis function close the gripper to grasp an object. This command executes immediately and is not queued like the trajectory.
         Returns:
-        dictionnary:Status message
+        dictionary:Status message
 
         Example:
         robot.grasp()  
