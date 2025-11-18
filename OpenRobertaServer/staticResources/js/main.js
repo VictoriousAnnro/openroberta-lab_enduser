@@ -271,26 +271,114 @@ require.config({
       (COMM = o("comm")),
       (Blockly = o("blockly")),
       // Load custom repetition scripts from staticResources/blockly via RequireJS.
-    require(['blockly_local/functionality'], function() {
-    console.log('Custom repetition scripts loaded (RequireJS)');
-    // Wait until the main workspace exists before initializing.
-    (function waitForWorkspace(attemptsLeft){
-        attemptsLeft = typeof attemptsLeft === 'number' ? attemptsLeft : 100;
-        var ws = (typeof Blockly.getMainWorkspace === 'function' && Blockly.getMainWorkspace()) || Blockly.mainWorkspace;
-        if (ws && window.Blockly ) {
-        try {
-            Blockly.initWorkspace(ws);
-            console.log('Repetition detector initialized (deferred)');
-        } catch (e) {
-            console.error('Failed to init repetition detector', e);
+      // Apply a small runtime patch to guard the Procedures flyout against
+      // procedure tuples whose second element is not a block (some block
+      // implementations return an arguments array). This prevents the flyout
+      // from attempting to call getDescendants on non-block objects.
+      (function(){
+        try{
+          if(window.Blockly && window.Blockly.Procedures && typeof window.Blockly.Procedures.allProcedures === 'function'){
+            var _origAllProc = window.Blockly.Procedures.allProcedures;
+            window.Blockly.Procedures.allProcedures = function(ws){
+              try{
+                var res = _origAllProc.call(this, ws);
+                function ensure(arr){
+                  if(!arr) return;
+                  for(var i=0;i<arr.length;i++){
+                    var t = arr[i];
+                    if(!t) continue;
+                    var cand = t[1];
+                    if(!cand || typeof cand.getDescendants !== 'function'){
+                      var def = window.Blockly.Procedures.getDefinition(t[0], ws);
+                      if(def) arr[i] = [t[0], def, t[2]];
+                    }
+                  }
+                }
+                ensure(res[0]); ensure(res[1]);
+                return res;
+              }catch(e){console.warn('allProcedures wrapper error',e);return _origAllProc.call(this, ws);} 
+            };
+            console.log('Blockly.Procedures.allProcedures patched for flyout safety');
+          }
+        }catch(err){console.warn('Could not apply procedures flyout patch',err)}
+      })();
+    // Try CommonJS/Node-style require first (works when bundling or running in Node)
+    (function(){
+      try {
+        if (typeof module === 'object' && module.exports) {
+          // path relative to this file: ../blockly/functionality.js
+          window.openRobertaFunctionality = require('../blockly/functionality.js');
         }
-        } else if (attemptsLeft > 0) {
-        setTimeout(function(){ waitForWorkspace(attemptsLeft - 1); }, 150);
-        } else {
-        console.error('Repetition detector: workspace not available after waiting.');
-        }
+      } catch (e) {
+        /* ignore - not running under CommonJS */
+      }
     })();
-    });
+
+    
+    (function(){
+      // Load the functionality module (CommonJS first if bundling, then AMD)
+      try {
+        if (typeof module === 'object' && module.exports) {
+          window.openRobertaFunctionality = require('../blockly/functionality.js');
+        }
+      } catch (e) { /* ignore */ }
+
+      require(['blockly_local/functionality'], function(funcMod) {
+        window.openRobertaFunctionality = window.openRobertaFunctionality || funcMod || window.openRobertaFunctionality;
+        console.log('Custom repetition scripts loaded (RequireJS)');
+
+        // Wait until the main workspace exists before initializing and attach listener
+        (function waitForWorkspace(attemptsLeft){
+          attemptsLeft = typeof attemptsLeft === 'number' ? attemptsLeft : 100;
+          var ws = (typeof Blockly.getMainWorkspace === 'function' && Blockly.getMainWorkspace()) || Blockly.mainWorkspace;
+          if (ws && window.Blockly ) {
+            try {
+              if (typeof Blockly.initWorkspace === 'function') {
+                try { Blockly.initWorkspace(ws); } catch (e) { /* non-fatal */ }
+              }
+
+              try {
+                var func = window.openRobertaFunctionality;
+                if (func && typeof func.highlightOnlyFunctionCandidates === 'function') {
+                  var tops = (ws.getTopBlocks && ws.getTopBlocks(true)) || [];
+                  var startBlock = tops.find(function(b){ return b && (b.type === 'robControls_start' || b.type === 'start' || b.type === 'program_start'); }) || tops[0];
+
+                  if (startBlock && !ws.__repetitionDetectorAttached) {
+                    ws.__repetitionDetectorAttached = true;
+                    var repTimer = null;
+                    ws.addChangeListener(function(event){
+                      try {
+                        if (repTimer) clearTimeout(repTimer);
+                        repTimer = setTimeout(function(){
+                          try { func.highlightOnlyFunctionCandidates(ws, startBlock); } catch (e) {}
+                        }, 250);
+                      } catch (e) {}
+                    });
+                      // Trigger an initial check shortly after attachment
+                      try {
+                        if (repTimer) clearTimeout(repTimer);
+                        repTimer = setTimeout(function(){
+                          try { func.highlightOnlyFunctionCandidates(ws, startBlock); } catch (e) {}
+                        }, 50);
+                      } catch (e) {}
+                  }
+                }
+              } catch (inner) {
+                console.warn('Could not attach repetition detector listener', inner);
+              }
+
+              console.log('Repetition detector initialized (deferred)');
+            } catch (e) {
+              console.error('Failed to init repetition detector', e);
+            }
+          } else if (attemptsLeft > 0) {
+            setTimeout(function(){ waitForWorkspace(attemptsLeft - 1); }, 150);
+          } else {
+            console.error('Repetition detector: workspace not available after waiting.');
+          }
+        })();
+      });
+    })(),
       (confDeleteController = o("confDelete.controller")),
       (configurationController = o("configuration.controller")),
       (confListController = o("confList.controller")),

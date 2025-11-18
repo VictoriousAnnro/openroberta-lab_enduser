@@ -1,3 +1,14 @@
+;(function(root, factory) {
+  if (typeof define === 'function' && define.amd) {
+    define([], factory);
+  } else if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.openRobertaFunctionality = factory();
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function() {
+  'use strict';
+
 /**
  * Custom Procedures and Function Auto-Creator
  * 
@@ -17,8 +28,24 @@ var toastPromptShown = false;
 
 
   function showToastPrompt(message, onConfirm, onCancel) {
+  // Forward to the enhanced implementation if available (defined later in file).
+  if (typeof showToastPromptImpl === 'function') {
+    try { return showToastPromptImpl(message, onConfirm, onCancel); } catch (e) { console.error('showToastPromptImpl error', e); }
+  }
+
+  // Fallback simple prompt (used only if the enhanced impl isn't yet defined)
   const toast = document.createElement("div");
   toast.className = "toast-prompt";
+  toast.style.position = 'fixed';
+  toast.style.right = '20px';
+  toast.style.bottom = '20px';
+  toast.style.zIndex = 20000;
+  toast.style.background = 'rgba(0,0,0,0.85)';
+  toast.style.color = '#fff';
+  toast.style.padding = '12px 14px';
+  toast.style.borderRadius = '6px';
+  toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
+  toast.style.fontFamily = 'Arial, sans-serif';
   toast.innerHTML = `
     <div class="toast-message">${message}</div>
     <div class="toast-buttons">
@@ -28,8 +55,8 @@ var toastPromptShown = false;
   `;
   document.body.appendChild(toast);
 
-  toast.querySelector(".toast-ok").onclick = () => { toast.remove(); onConfirm(); };
-  toast.querySelector(".toast-cancel").onclick = () => { toast.remove(); onCancel(); };
+  toast.querySelector(".toast-ok").onclick = () => { try { toast.remove(); onConfirm(); } catch(e) { console.error(e); } };
+  toast.querySelector(".toast-cancel").onclick = () => { try { toast.remove(); onCancel(); } catch(e) { console.error(e); } };
 }
 
 
@@ -158,9 +185,9 @@ function safeCloneBlock(block, workspace) {
     return cloneTop;
 }
 
+// 
 
-
-function insertProcedureCall(group, name) {
+function insertProcedureCall(group, name,workspace) {
     const call = workspace.newBlock("customProcedures_callnoreturn");
     call.setFieldValue(name, "NAME");
 
@@ -1071,14 +1098,18 @@ function extractLiteralParameters(group) {
 /**
  * Create a custom function from a selected block sequence
  */
-function createCustomBlockFromSequence(groups) {
+function createCustomBlockFromSequence(groups,workspace) {
+  console.log('createCustomBlockFromSequence: invoked, groups length=', groups ? groups.length : 0);
+  // Ensure we have a workspace reference. Older code assumed a global `workspace` variable.
+  
+
   const primaryGroup = groups[0];
   const signature = getSequenceSignature(primaryGroup);
 
   if (customFunctionRegistry[signature]) {
     const name = customFunctionRegistry[signature];
     groups.forEach(group => {
-      insertProcedureCall(group, name);
+      insertProcedureCall(group, name,workspace);
     });
     return;
   }
@@ -1140,7 +1171,7 @@ function createCustomBlockFromSequence(groups) {
         // If the name actually changed, update the toolbox
         if (oldValue !== newValue) {
           setTimeout(() => {
-            updateToolboxForProcedureRename(oldValue, newValue);
+            updateToolboxForProcedureRename(oldValue, newValue,workspace);
           }, 100);
         }
       };
@@ -1294,11 +1325,19 @@ function createCustomBlockFromSequence(groups) {
     }
 
     groups.forEach(group => {
-      insertProcedureCall(group, functionName);
+      insertProcedureCall(group, functionName,workspace);
     });
 
+    // visual feedback for debugging: flash first block of the primary group
+    try {
+      if (primaryGroup && primaryGroup[0]) {
+        applyBorderGlow(primaryGroup[0]);
+        setTimeout(() => removeBorderGlow(primaryGroup[0]), 1200);
+      }
+    } catch (e) { console.warn('flash feedback failed', e); }
+
     // Update toolbox to show the new function
-    updateToolboxForProcedure(functionName);
+    updateToolboxForProcedure(functionName,workspace);
 
   } finally {
     Blockly.Events.setGroup(false);
@@ -1327,20 +1366,53 @@ function getSequenceSignature(group) {
     .join("|");
 }
 
-function showToastPrompt(message, onConfirm, onCancel) {
+function showToastPromptImpl(message, onConfirm, onCancel) {
   const toast = document.createElement("div");
   toast.className = "toast-prompt";
+  // ensure it's visible regardless of existing CSS
+  toast.style.position = 'fixed';
+  toast.style.right = '20px';
+  toast.style.bottom = '20px';
+  toast.style.zIndex = 20000;
+  toast.style.background = 'rgba(0,0,0,0.85)';
+  toast.style.color = '#fff';
+  toast.style.padding = '12px 14px';
+  toast.style.borderRadius = '6px';
+  toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
+  toast.style.fontFamily = 'Arial, sans-serif';
+  toast.style.maxWidth = '320px';
   toast.innerHTML = `
-    <div class="toast-message">${message}</div>
-    <div class="toast-buttons">
-      <button class="toast-cancel">No</button>
+    <div class="toast-message" style="margin-bottom:8px">${message}</div>
+    <div class="toast-buttons" style="text-align:right">
+      <button class="toast-cancel" style="margin-right:8px">No</button>
       <button class="toast-ok">Yes</button>
     </div>
   `;
+  console.log('showToastPrompt: creating toast');
   document.body.appendChild(toast);
 
-  toast.querySelector(".toast-ok").onclick = () => { toast.remove(); onConfirm(); };
-  toast.querySelector(".toast-cancel").onclick = () => { toast.remove(); onCancel(); };
+  const okBtn = toast.querySelector(".toast-ok");
+  const cancelBtn = toast.querySelector(".toast-cancel");
+
+  if (okBtn) {
+    okBtn.addEventListener('click', function() {
+      try {
+        console.log('showToastPrompt: OK clicked');
+        toast.remove();
+      } catch (e) {}
+      try { onConfirm(); } catch (err) { console.error('onConfirm failed', err); }
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', function() {
+      try {
+        console.log('showToastPrompt: Cancel clicked');
+        toast.remove();
+      } catch (e) {}
+      try { onCancel(); } catch (err) { console.error('onCancel failed', err); }
+    });
+  }
 }
 
 function cloneRobertaBlock(block, workspace, deep = true) {
@@ -1442,108 +1514,21 @@ function safeCloneBlock(block, workspace) {
   return cloneTop;
 }
 
-function updateToolboxForProcedure(procName) {
-  if (!workspace || !workspace.toolbox_) return;
-  
-  try {
-    // Get the toolbox XML element
-    const toolboxXml = document.getElementById('toolbox');
-    if (!toolboxXml) return;
-    
-    // Find the Functions category
-    let functionsCategory = null;
-    const categories = toolboxXml.querySelectorAll(':scope > category');
-    
-    for (let cat of categories) {
-      const nameAttr = cat.getAttribute('name');
-      if (nameAttr && nameAttr.toLowerCase() === 'functions') {
-        functionsCategory = cat;
-        break;
-      }
-    }
-    
-    if (!functionsCategory) return;
-    
-    // Check if this procedure call block already exists
-    const existingBlocks = functionsCategory.querySelectorAll('block[type="procedures_callnoreturn"]');
-    let blockExists = false;
-    for (let block of existingBlocks) {
-      const mutation = block.querySelector('mutation');
-      if (mutation && mutation.getAttribute('name') === procName) {
-        blockExists = true;
-        break;
-      }
-    }
-    
-    // If not, add it
-    if (!blockExists) {
-      const callBlockXml = document.createElement('block');
-      callBlockXml.setAttribute('type', 'procedures_callnoreturn');
-      const mutation = document.createElement('mutation');
-      mutation.setAttribute('name', procName);
-      callBlockXml.appendChild(mutation);
-      functionsCategory.appendChild(callBlockXml);
-    }
-    
-    // Now rebuild the toolbox tree to include the new block
-    // This is the critical step - we need to rebuild the entire toolbox
-    if (workspace.toolbox_) {
-      // Save current state
-      const oldToolbox = workspace.toolbox_;
-      
-      // Clear and recreate the toolbox
-      workspace.updateToolbox(toolboxXml);
-    }
-    
-  } catch (e) {
-    console.warn('Could not update toolbox:', e);
-  }
+function updateToolboxForProcedure(procName, workspace) {
+  // No-op: Blockly's Functions category is dynamic and generates caller blocks
+  // from procedure definitions found in the workspace. Manipulating the
+  // toolbox DOM here can break Blockly's flyout (getDescendants errors).
+  console.log('updateToolboxForProcedure: noop (procName=', procName, ')');
+  return;
 }
 
-function updateToolboxForProcedureRename(oldName, newName) {
-  if (!workspace || !workspace.toolbox_) return;
-  
-  try {
-    // Get the toolbox XML element
-    const toolboxXml = document.getElementById('toolbox');
-    if (!toolboxXml) return;
-    
-    // Find the Functions category
-    let functionsCategory = null;
-    const categories = toolboxXml.querySelectorAll(':scope > category');
-    
-    for (let cat of categories) {
-      const nameAttr = cat.getAttribute('name');
-      if (nameAttr && nameAttr.toLowerCase() === 'functions') {
-        functionsCategory = cat;
-        break;
-      }
-    }
-    
-    if (!functionsCategory) return;
-    
-    // Find the call block with the old name and update it
-    const existingBlocks = functionsCategory.querySelectorAll('block[type="procedures_callnoreturn"]');
-    for (let block of existingBlocks) {
-      const mutation = block.querySelector('mutation');
-      if (mutation && mutation.getAttribute('name') === oldName) {
-        // Update the mutation to the new name
-        mutation.setAttribute('name', newName);
-        break;
-      }
-    }
-    
-    // Rebuild the toolbox to reflect the name change
-    if (workspace.toolbox_) {
-      workspace.updateToolbox(toolboxXml);
-    }
-    
-  } catch (e) {
-    console.warn('Could not update toolbox on rename:', e);
-  }
+function updateToolboxForProcedureRename(oldName, newName,workspace) {
+  // No-op: don't manipulate the toolbox DOM directly (Blockly handles procedure caller generation).
+  console.log('updateToolboxForProcedureRename: noop (oldName=', oldName, 'newName=', newName, ')');
+  return;
 }
-
-function insertProcedureCall(group, name) {
+/*
+function insertProcedureCall(group, name, workspace) {
   const call = workspace.newBlock("procedures_callnoreturn");
   call.setFieldValue(name, "NAME");
 
@@ -1599,15 +1584,46 @@ function insertProcedureCall(group, name) {
   const parent = first.previousConnection?.targetBlock();
   const next = last.nextConnection?.targetBlock();
 
-  if (parent?.nextConnection) {
-    parent.nextConnection.connect(call.previousConnection);
+  console.log('insertProcedureCall: parent=', parent ? parent.type : null, 'next=', next ? next.type : null);
+
+  let connected = false;
+  try {
+    if (parent && parent.nextConnection && call.previousConnection) {
+      try { parent.nextConnection.connect(call.previousConnection); connected = true; console.log('insertProcedureCall: connected to parent'); } catch (e) { console.warn('insertProcedureCall: failed to connect to parent', e); }
+    }
+  } catch (e) { console.warn('insertProcedureCall: parent connect error', e); }
+
+  try {
+    if (next && call.nextConnection && next.previousConnection) {
+      try { call.nextConnection.connect(next.previousConnection); connected = true; console.log('insertProcedureCall: connected to next'); } catch (e) { console.warn('insertProcedureCall: failed to connect to next', e); }
+    }
+  } catch (e) { console.warn('insertProcedureCall: next connect error', e); }
+
+  // Fallback: if we couldn't connect the call in-place, position it where the first block is
+  if (!connected) {
+    try {
+      if (first && typeof first.getRelativeToSurfaceXY === 'function' && typeof call.getRelativeToSurfaceXY === 'function') {
+        const firstXY = first.getRelativeToSurfaceXY();
+        const callXY = call.getRelativeToSurfaceXY();
+        const dx = firstXY.x - callXY.x;
+        const dy = firstXY.y - callXY.y;
+        call.moveBy(dx, dy);
+        console.log('insertProcedureCall: moved call to first block position');
+      }
+    } catch (e) { console.warn('insertProcedureCall: fallback positioning failed', e); }
   }
 
-  if (next) {
-    call.nextConnection.connect(next.previousConnection);
-  }
+  // Remove the original blocks (attempt to dispose them safely)
+  group.forEach(b => {
+    try {
+      safeDispose(b);
+    } catch (e) {
+      console.error('insertProcedureCall: safeDispose failed for block', b && b.type, e);
+    }
+  });
 
-  group.forEach(b => safeDispose(b));
+  // Update the toolbox to show the new procedure
+  updateToolboxForProcedure(name);
 
   // Update the toolbox to show the new procedure
   updateToolboxForProcedure(name);
@@ -1645,7 +1661,7 @@ function serializeBlockMinimal(block) {
 
   return json;
 }
-
+*/
 // ============================================================================
 // VISUAL HIGHLIGHTING AND DESIGN
 // ============================================================================
@@ -1657,7 +1673,15 @@ function applyBorderGlow(block) {
   if (!path) return;
 
   if (!block.__origStroke) {
-    block.__origStroke = path.getAttribute("stroke") || "#000000";
+    // sanitize stroke color: Blockly may not accept 8-digit hex (#RRGGBBAA)
+    var s = path.getAttribute("stroke") || "#000000";
+    try {
+      if (typeof s === 'string' && /^#([0-9a-fA-F]{8})$/.test(s)) {
+        // drop alpha channel
+        s = '#' + s.substr(1, 6);
+      }
+    } catch (e) {}
+    block.__origStroke = s;
     block.__origStrokeWidth = path.getAttribute("stroke-width") || 2;
   }
 
@@ -1693,7 +1717,14 @@ function removeBorderGlow(block) {
 
   paths.forEach(path => {
     if (block.__origStroke != null) {
-      path.setAttribute("stroke", block.__origStroke);
+      // sanitize before applying: remove alpha if present
+      var orig = block.__origStroke;
+      try {
+        if (typeof orig === 'string' && /^#([0-9a-fA-F]{8})$/.test(orig)) {
+          orig = '#' + orig.substr(1,6);
+        }
+      } catch (e) {}
+      path.setAttribute("stroke", orig);
     } else {
       path.removeAttribute("stroke");
     }
@@ -1853,12 +1884,141 @@ function highlightBlockAndChildren(block) {
 }
 
 function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
+  console.log("Highlighting function candidates...");
   toastPromptShown = false;
   workspace.getAllBlocks().forEach(b => {
     removeBorderGlow(b)
   });
   
-  const chain = getLinearChainFromStart(startBlock);
+  // If no startBlock provided, try to pick the best candidate from the workspace
+  if (!startBlock) {
+    try {
+      const tops = (workspace.getTopBlocks && workspace.getTopBlocks(true)) || [];
+
+      // Prefer the top block that yields the longest linear chain
+      let best = null;
+      let bestLen = -1;
+      for (let t of tops) {
+        try {
+          const ch = getLinearChainFromStart(t) || [];
+          if (ch.length > bestLen) {
+            bestLen = ch.length;
+            best = t;
+          }
+        } catch (e) {}
+      }
+
+      if (best && bestLen > 0) {
+        startBlock = best;
+      } else {
+        // Fallback: scan all blocks to find the one with the longest next-chain
+        const all = (workspace.getAllBlocks && workspace.getAllBlocks()) || [];
+        best = null; bestLen = -1;
+        for (let b of all) {
+          try {
+            const ch = getLinearChainFromStart(b) || [];
+            if (ch.length > bestLen) {
+              bestLen = ch.length;
+              best = b;
+            }
+          } catch (e) {}
+        }
+        startBlock = (bestLen > 0 && best) ? best : (tops[0] || all[0] || null);
+      }
+
+      console.log('highlightOnlyFunctionCandidates: chosen startBlock =', startBlock && startBlock.type);
+    } catch (e) {
+      console.warn('highlightOnlyFunctionCandidates: error selecting startBlock', e);
+    }
+  }
+
+  try {
+    var sbId = startBlock && startBlock.id;
+    var topsDbg = (workspace.getTopBlocks && workspace.getTopBlocks(true)) || [];
+    var firstTopId = topsDbg[0] && topsDbg[0].id;
+    console.log('highlightOnlyFunctionCandidates: startBlock id=', sbId, 'tops[0] id=', firstTopId, 'equal=', sbId === firstTopId);
+    console.log('highlightOnlyFunctionCandidates: startBlock object === tops[0]? ', startBlock === topsDbg[0]);
+    console.log('highlightOnlyFunctionCandidates: startBlock.getNextBlock exists?', !!(startBlock && startBlock.getNextBlock));
+  } catch (e) {}
+
+  const chain = getLinearChainFromStart(startBlock) || [];
+  console.log('highlightOnlyFunctionCandidates: linear chain length =', chain.length);
+  // If chain is empty, try a more aggressive traversal that walks top-blocks
+  // and collects statement/next chains to build a usable linear sequence.
+  if ((!chain || chain.length === 0) && startBlock) {
+    try {
+      function collectFromBlock(b, out) {
+        if (!b) return;
+        // For a block, collect its next-chain and also expand statement inputs in-order
+        let cur = b.getNextBlock && b.getNextBlock();
+        while (cur) {
+          out.push(cur);
+          // For each statement input on cur, collect nested chains as inline sequence
+          if (cur.inputList && cur.inputList.length) {
+            cur.inputList.forEach(function(inp) {
+              try {
+                if (inp.connection && inp.connection.targetBlock) {
+                  let child = inp.connection.targetBlock();
+                  while (child) {
+                    out.push(child);
+                    // also include child's next-chain
+                    let nc = child.getNextBlock && child.getNextBlock();
+                    while (nc) {
+                      out.push(nc);
+                      nc = nc.getNextBlock && nc.getNextBlock();
+                    }
+                    child = child.getNextBlock && child.getNextBlock();
+                  }
+                }
+              } catch (e) {}
+            });
+          }
+          cur = cur.getNextBlock && cur.getNextBlock();
+        }
+      }
+
+      var alt = [];
+      // Try collecting starting from the top block (startBlock may be a top)
+      collectFromBlock(startBlock, alt);
+
+      // If still empty, scan subsequent top blocks and collect their chains
+      if (alt.length === 0) {
+        var tops = (workspace.getTopBlocks && workspace.getTopBlocks(true)) || [];
+        var startIndex = tops.indexOf(startBlock);
+        if (startIndex < 0) startIndex = 0;
+        for (var ti = startIndex; ti < tops.length; ti++) {
+          collectFromBlock(tops[ti], alt);
+        }
+      }
+
+      if (alt.length > 0) {
+        console.log('highlightOnlyFunctionCandidates: using alternative chain length =', alt.length);
+        chain.length = 0;
+        Array.prototype.push.apply(chain, alt);
+      }
+    } catch (e) {
+      console.warn('highlightOnlyFunctionCandidates: alternative chain build failed', e);
+    }
+  }
+  if (chain.length === 0) {
+    try {
+      const tops = (workspace.getTopBlocks && workspace.getTopBlocks(true)) || [];
+      console.warn('Repetition diagnostic: top blocks count =', tops.length);
+      tops.slice(0, 10).forEach(function(b, i) {
+        try { console.warn(' top[' + i + '] type=', b && b.type, 'linearChainLen=', (getLinearChainFromStart(b) || []).length); } catch (e) {}
+      });
+
+      const all = (workspace.getAllBlocks && workspace.getAllBlocks()) || [];
+      console.warn('Repetition diagnostic: all blocks count =', all.length);
+      all.slice(0, 30).forEach(function(b, i) {
+        try {
+          var hasPrev = !!(b && b.previousConnection && b.previousConnection.targetConnection);
+          var hasNext = !!(b && b.getNextBlock && b.getNextBlock());
+          console.warn(' all[' + i + '] type=', b && b.type, 'hasPrev=', hasPrev, 'hasNext=', hasNext);
+        } catch (e) {}
+      });
+    } catch (e) { console.warn('Repetition diagnostic failed', e); }
+  }
   if (chain.length < SEQ_LEN) return;
 
   let sequences = {};
@@ -1884,20 +2044,60 @@ function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
   });
 
   if (allDuplicateGroups.length > 0) {
+    console.log('highlightOnlyFunctionCandidates: found duplicate groups =', allDuplicateGroups.length);
     allDuplicateGroups.forEach(group => {
       group.forEach(b => highlightBlockAndChildren(b));
     });
-    
+
     if (!toastPromptShown) {
       toastPromptShown = true;
+      console.log('highlightOnlyFunctionCandidates: scheduling toast prompt in 5s');
       setTimeout(() => {
+        console.log('highlightOnlyFunctionCandidates: invoking showToastPrompt');
         showToastPrompt(
             "Identical block sequence detected. Replace with a custom block?",
-            () => createCustomBlockFromSequence(allDuplicateGroups),
-            () => console.log("User declined replacement.")
+            function() {
+              try {
+                console.log('toast OK clicked: calling createCustomBlockFromSequence');
+                createCustomBlockFromSequence(allDuplicateGroups,workspace);
+              } catch (err) {
+                console.error('createCustomBlockFromSequence failed', err);
+              }
+            },
+            function() {
+              try { console.log('toast Cancel clicked: user declined replacement.'); } catch (e) {}
+            }
         );
       }, 5000);
     }
     
   }
 }
+
+  // Exported API for CommonJS/AMD/browser global
+  return {
+    customFunctionRegistry: typeof customFunctionRegistry !== 'undefined' ? customFunctionRegistry : {},
+    showToastPrompt: typeof showToastPrompt !== 'undefined' ? showToastPrompt : null,
+    cloneRobertaBlock: typeof cloneRobertaBlock !== 'undefined' ? cloneRobertaBlock : null,
+    safeCloneBlock: typeof safeCloneBlock !== 'undefined' ? safeCloneBlock : null,
+    insertProcedureCall: typeof insertProcedureCall !== 'undefined' ? insertProcedureCall : null,
+    wipeConnections: typeof wipeConnections !== 'undefined' ? wipeConnections : null,
+    serializeBlockMinimal: typeof serializeBlockMinimal !== 'undefined' ? serializeBlockMinimal : null,
+    makeBlock: typeof makeBlock !== 'undefined' ? makeBlock : null,
+    buildTestCase: typeof buildTestCase !== 'undefined' ? buildTestCase : null,
+    buildLargeTestCase: typeof buildLargeTestCase !== 'undefined' ? buildLargeTestCase : null,
+    mixColors: typeof mixColors !== 'undefined' ? mixColors : null,
+    runTest: typeof runTest !== 'undefined' ? runTest : null,
+    run2ndTest: typeof run2ndTest !== 'undefined' ? run2ndTest : null,
+    extractLiteralParameters: typeof extractLiteralParameters !== 'undefined' ? extractLiteralParameters : null,
+    createCustomBlockFromSequence: typeof createCustomBlockFromSequence !== 'undefined' ? createCustomBlockFromSequence : null,
+    safeDispose: typeof safeDispose !== 'undefined' ? safeDispose : null,
+    getSequenceSignature: typeof getSequenceSignature !== 'undefined' ? getSequenceSignature : null,
+    updateToolboxForProcedure: typeof updateToolboxForProcedure !== 'undefined' ? updateToolboxForProcedure : null,
+    updateToolboxForProcedureRename: typeof updateToolboxForProcedureRename !== 'undefined' ? updateToolboxForProcedureRename : null,
+    applyBorderGlow: typeof applyBorderGlow !== 'undefined' ? applyBorderGlow : null,
+    removeBorderGlow: typeof removeBorderGlow !== 'undefined' ? removeBorderGlow : null,
+    highlightOnlyFunctionCandidates: typeof highlightOnlyFunctionCandidates !== 'undefined' ? highlightOnlyFunctionCandidates : null
+  };
+
+});
