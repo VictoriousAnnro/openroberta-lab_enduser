@@ -366,11 +366,16 @@ require.config({
               } catch (inner) {
                 console.warn('Could not attach repetition detector listener', inner);
               }
-
               console.log('Repetition detector initialized (deferred)');
+
+              //newmethod
+              try { func.initRunBrick(ws); } catch (e) {}
+
             } catch (e) {
               console.error('Failed to init repetition detector', e);
             }
+
+
           } else if (attemptsLeft > 0) {
             setTimeout(function(){ waitForWorkspace(attemptsLeft - 1); }, 150);
           } else {

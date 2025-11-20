@@ -1,5 +1,31 @@
 **Anne's New Notes**
 
+### Set up virtual environment for API
+**You should only need to do this part once**
+You'll probably need to delete your old 'venv' virtual environment. Use this command for that:
+sudo rm -rf venv
+
+Then, you must:
+- CREATE a new virtual environment
+- Install the requirements
+Follow the instructions from step 2 in the README.md within mj_pick_and_place. This may take a while.
+
+### How to run the OpenRoberta-Lab with API
+To make use of the API, we need to launch both the app.py and the OpenRoberta-Lab.
+
+In one terminal (bash/ubuntu), run this command:
+cd mj_pick_and_place
+Then activate your virtual environment:
+source venv/bin/activate
+
+To run app.py:
+flask --app app.py run
+
+Then, open a SECOND terminal (bash/ubuntu), and run the OpenRoberta like usual:
+./ora.sh  start-from-git
+
+Website at http://localhost:1999/
+
 ### General notes about the system
 The code found within /openroberta-lab covers the back-end logic of OpenRoberta. 
 The block declarations, UI and general front-end logic is defined in the blockly git (see section 'Changing the blockly front-end' further down).
