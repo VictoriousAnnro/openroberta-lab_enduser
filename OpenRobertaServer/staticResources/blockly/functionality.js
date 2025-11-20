@@ -322,358 +322,6 @@ function serializeBlockMinimal(block) {
 
 
 
-function buildTestCase(ws, offsetX = 30, offsetY = 30) {
-
-    /**********************************************
-     * First Sequence
-     **********************************************/
-    const start = ws.newBlock("robControls_start");
-    start.initSvg(); start.render();
-    start.moveBy(offsetX, offsetY);
-
-    const if1 = ws.newBlock("controls_if");
-    if1.initSvg(); if1.render();
-    start.nextConnection.connect(if1.previousConnection);
-
-    // Condition for IF1
-    const cond1 = ws.newBlock("logic_compare");
-    cond1.initSvg(); cond1.render();
-    if1.getInput("IF0").connection.connect(cond1.outputConnection);
-
-    const numLeft1 = ws.newBlock("math_number");
-    numLeft1.setFieldValue("5", "NUM");
-    numLeft1.initSvg(); numLeft1.render();
-    cond1.getInput("A").connection.connect(numLeft1.outputConnection);
-
-    const numRight1 = ws.newBlock("math_number");
-    numRight1.setFieldValue("10", "NUM");
-    numRight1.initSvg(); numRight1.render();
-    cond1.getInput("B").connection.connect(numRight1.outputConnection);
-
-    // print inside IF1
-    const printInside1 = ws.newBlock("text_print");
-    printInside1.initSvg(); printInside1.render();
-    if1.getInput("DO0").connection.connect(printInside1.previousConnection);
-
-    const txtInside1 = ws.newBlock("text");
-    txtInside1.setFieldValue("This", "TEXT");
-    txtInside1.initSvg(); txtInside1.render();
-    printInside1.getInput("TEXT").connection.connect(txtInside1.outputConnection);
-
-
-    // REPEAT1
-    const repeat1 = ws.newBlock("controls_repeat_ext");
-    repeat1.initSvg(); repeat1.render();
-    if1.nextConnection.connect(repeat1.previousConnection);
-
-    const repeatCount1 = ws.newBlock("math_number");
-    repeatCount1.setFieldValue("3", "NUM");
-    repeatCount1.initSvg(); repeatCount1.render();
-    repeat1.getInput("TIMES").connection.connect(repeatCount1.outputConnection);
-
-    // print inside REPEAT1
-    const print2 = ws.newBlock("text_print");
-    print2.initSvg(); print2.render();
-    repeat1.getInput("DO").connection.connect(print2.previousConnection);
-
-    const txt2_1 = ws.newBlock("text");
-    txt2_1.setFieldValue("is", "TEXT");
-    txt2_1.initSvg(); txt2_1.render();
-    print2.getInput("TEXT").connection.connect(txt2_1.outputConnection);
-
-    // print AFTER REPEAT1
-    const print3 = ws.newBlock("text_print");
-    print3.initSvg(); print3.render();
-    repeat1.nextConnection.connect(print3.previousConnection);
-
-    const txt3_1 = ws.newBlock("text");
-    txt3_1.setFieldValue("a testcase", "TEXT");
-    txt3_1.initSvg(); txt3_1.render();
-    print3.getInput("TEXT").connection.connect(txt3_1.outputConnection);
-
-
-    /**********************************************
-     * Second Sequence (offset vertically)
-     **********************************************/
-    const offsetY2 = offsetY + 250; // shift down
-
-    const if2 = ws.newBlock("controls_if");
-    if2.initSvg(); if2.render();
-    print3.nextConnection.connect(if2.previousConnection);
-
-    if2.moveBy(0, 200);  // push second sequence lower
-
-
-    // Condition for IF2
-    const cond2 = ws.newBlock("logic_compare");
-    cond2.initSvg(); cond2.render();
-    if2.getInput("IF0").connection.connect(cond2.outputConnection);
-
-    const numLeft2 = ws.newBlock("math_number");
-    numLeft2.setFieldValue("20", "NUM");
-    numLeft2.initSvg(); numLeft2.render();
-    cond2.getInput("A").connection.connect(numLeft2.outputConnection);
-
-    const numRight2 = ws.newBlock("math_number");
-    numRight2.setFieldValue("15", "NUM");
-    numRight2.initSvg(); numRight2.render();
-    cond2.getInput("B").connection.connect(numRight2.outputConnection);
-
-
-    // print inside IF2
-    const printInside2 = ws.newBlock("text_print");
-    printInside2.initSvg(); printInside2.render();
-    if2.getInput("DO0").connection.connect(printInside2.previousConnection);
-
-    const txtInside2 = ws.newBlock("text");
-    txtInside2.setFieldValue("because", "TEXT");
-    txtInside2.initSvg(); txtInside2.render();
-    printInside2.getInput("TEXT").connection.connect(txtInside2.outputConnection);
-
-
-    // REPEAT2
-    const repeat2 = ws.newBlock("controls_repeat_ext");
-    repeat2.initSvg(); repeat2.render();
-    if2.nextConnection.connect(repeat2.previousConnection);
-
-    const repeatCount2 = ws.newBlock("math_number");
-    repeatCount2.setFieldValue("2", "NUM");
-    repeatCount2.initSvg(); repeatCount2.render();
-    repeat2.getInput("TIMES").connection.connect(repeatCount2.outputConnection);
-
-    // print inside REPEAT2
-    const print4 = ws.newBlock("text_print");
-    print4.initSvg(); print4.render();
-    repeat2.getInput("DO").connection.connect(print4.previousConnection);
-
-    const txt4 = ws.newBlock("text");
-    txt4.setFieldValue("we are", "TEXT");
-    txt4.initSvg(); txt4.render();
-    print4.getInput("TEXT").connection.connect(txt4.outputConnection);
-
-    // print AFTER REPEAT2
-    const print5 = ws.newBlock("text_print");
-    print5.initSvg(); print5.render();
-    repeat2.nextConnection.connect(print5.previousConnection);
-
-    const txt5 = ws.newBlock("text");
-    txt5.setFieldValue("bored", "TEXT");
-    txt5.initSvg(); txt5.render();
-    print5.getInput("TEXT").connection.connect(txt5.outputConnection);
-
-
-    return {
-        start,
-        last: print5,
-
-        // first chain
-        if1, repeat1, printInside1, print2, print3,
-
-        // second chain
-        if2, repeat2, printInside2, print4, print5
-    };
-}
-
-function buildLargeTestCase(ws, offsetX = 30, offsetY = 30) {
-
-    /**********************************************
-     * Sequence 1 — simple IF + REPEAT
-     **********************************************/
-    const start = ws.newBlock("robControls_start");
-    start.initSvg(); start.render();
-    start.moveBy(offsetX, offsetY);
-
-    const if1 = ws.newBlock("controls_if");
-    if1.initSvg(); if1.render();
-    start.nextConnection.connect(if1.previousConnection);
-
-    // IF1 condition (5 < 10)
-    const cond1 = ws.newBlock("logic_compare");
-    cond1.initSvg(); cond1.render();
-    if1.getInput("IF0").connection.connect(cond1.outputConnection);
-
-    const num1A = ws.newBlock("math_number");
-    num1A.setFieldValue("5", "NUM");
-    num1A.initSvg(); num1A.render();
-    cond1.getInput("A").connection.connect(num1A.outputConnection);
-
-    const num1B = ws.newBlock("math_number");
-    num1B.setFieldValue("10", "NUM");
-    num1B.initSvg(); num1B.render();
-    cond1.getInput("B").connection.connect(num1B.outputConnection);
-
-    // Console print
-    const print1 = ws.newBlock("text_print");
-    print1.initSvg(); print1.render();
-    if1.getInput("DO0").connection.connect(print1.previousConnection);
-
-    const txt1 = ws.newBlock("text");
-    txt1.setFieldValue("Start of Large Testcase", "TEXT");
-    txt1.initSvg(); txt1.render();
-    print1.getInput("TEXT").connection.connect(txt1.outputConnection);
-
-    // REPEAT 4
-    const repeat1 = ws.newBlock("controls_repeat_ext");
-    repeat1.initSvg(); repeat1.render();
-    if1.nextConnection.connect(repeat1.previousConnection);
-
-    const repeatCount1 = ws.newBlock("math_number");
-    repeatCount1.setFieldValue("4", "NUM");
-    repeatCount1.initSvg(); repeatCount1.render();
-    repeat1.getInput("TIMES").connection.connect(repeatCount1.outputConnection);
-
-    // inside REPEAT1 → print
-    const printRep1 = ws.newBlock("text_print");
-    printRep1.initSvg(); printRep1.render();
-    repeat1.getInput("DO").connection.connect(printRep1.previousConnection);
-
-    const txtRep1 = ws.newBlock("text");
-    txtRep1.setFieldValue("Looping...", "TEXT");
-    txtRep1.initSvg(); txtRep1.render();
-    printRep1.getInput("TEXT").connection.connect(txtRep1.outputConnection);
-
-
-    /**********************************************
-     * Sequence 2 — nested IF inside REPEAT + boolean logic
-     **********************************************/
-
-    const repeat2 = ws.newBlock("controls_repeat_ext");
-    repeat2.initSvg(); repeat2.render();
-    repeat1.nextConnection.connect(repeat2.previousConnection);
-
-    const repeatCount2 = ws.newBlock("math_number");
-    repeatCount2.setFieldValue("3", "NUM");
-    repeatCount2.initSvg(); repeatCount2.render();
-    repeat2.getInput("TIMES").connection.connect(repeatCount2.outputConnection);
-
-    // inside REPEAT2 → IF
-    const if2 = ws.newBlock("controls_if");
-    if2.initSvg(); if2.render();
-    repeat2.getInput("DO").connection.connect(if2.previousConnection);
-
-    // IF2 condition = (20 > 15 AND TRUE)
-    const logicAnd = ws.newBlock("logic_operation");
-    logicAnd.setFieldValue("AND", "OP");
-    logicAnd.initSvg(); logicAnd.render();
-    if2.getInput("IF0").connection.connect(logicAnd.outputConnection);
-
-    const condLeft = ws.newBlock("logic_compare");
-    condLeft.initSvg(); condLeft.render();
-    logicAnd.getInput("A").connection.connect(condLeft.outputConnection);
-
-    const num2A = ws.newBlock("math_number");
-    num2A.setFieldValue("20", "NUM");
-    num2A.initSvg(); num2A.render();
-    condLeft.getInput("A").connection.connect(num2A.outputConnection);
-
-    const num2B = ws.newBlock("math_number");
-    num2B.setFieldValue("15", "NUM");
-    num2B.initSvg(); num2B.render();
-    condLeft.getInput("B").connection.connect(num2B.outputConnection);
-
-    const boolTrue = ws.newBlock("logic_boolean");
-    boolTrue.setFieldValue("TRUE", "BOOL");
-    boolTrue.initSvg(); boolTrue.render();
-    logicAnd.getInput("B").connection.connect(boolTrue.outputConnection);
-
-    // inside IF2 → print
-    const printInside2 = ws.newBlock("text_print");
-    printInside2.initSvg(); printInside2.render();
-    if2.getInput("DO0").connection.connect(printInside2.previousConnection);
-
-    const txtInside2 = ws.newBlock("text");
-    txtInside2.setFieldValue("Nested IF triggered", "TEXT");
-    txtInside2.initSvg(); txtInside2.render();
-    printInside2.getInput("TEXT").connection.connect(txtInside2.outputConnection);
-
-
-    /**********************************************
-     * Sequence 3 — WHILE loop + math + second IF
-     **********************************************/
-
-    const while1 = ws.newBlock("controls_whileUntil");
-    while1.setFieldValue("WHILE", "MODE");
-    while1.initSvg(); while1.render();
-    repeat2.nextConnection.connect(while1.previousConnection);
-
-    // While condition = (counter < 5)
-    const condWhile = ws.newBlock("logic_compare");
-    condWhile.initSvg(); condWhile.render();
-    while1.getInput("BOOL").connection.connect(condWhile.outputConnection);
-
-    const counterVar = ws.newBlock("variables_get");
-    counterVar.setFieldValue("counter", "VAR");
-    counterVar.initSvg(); counterVar.render();
-    condWhile.getInput("A").connection.connect(counterVar.outputConnection);
-
-    const num5 = ws.newBlock("math_number");
-    num5.setFieldValue("5", "NUM");
-    num5.initSvg(); num5.render();
-    condWhile.getInput("B").connection.connect(num5.outputConnection);
-
-    // inside WHILE → another IF
-    const if3 = ws.newBlock("controls_if");
-    if3.initSvg(); if3.render();
-    while1.getInput("DO").connection.connect(if3.previousConnection);
-
-    // IF3 condition counter % 2 == 0
-    const mathMod = ws.newBlock("math_modulo");
-    mathMod.initSvg(); mathMod.render();
-    if3.getInput("IF0").connection.connect(mathMod.outputConnection);
-
-    const varMod = ws.newBlock("variables_get");
-    varMod.setFieldValue("counter", "VAR");
-    varMod.initSvg(); varMod.render();
-    mathMod.getInput("DIVIDEND").connection.connect(varMod.outputConnection);
-
-    const num2 = ws.newBlock("math_number");
-    num2.setFieldValue("2", "NUM");
-    num2.initSvg(); num2.render();
-    mathMod.getInput("DIVISOR").connection.connect(num2.outputConnection);
-
-    const num0 = ws.newBlock("math_number");
-    num0.setFieldValue("0", "NUM");
-    num0.initSvg(); num0.render();
-
-    const condEq = ws.newBlock("logic_compare");
-    condEq.initSvg(); condEq.render();
-    condEq.getInput("A").connection.connect(mathMod.outputConnection);
-    condEq.getInput("B").connection.connect(num0.outputConnection);
-    if3.getInput("IF0").connection.disconnect();
-    if3.getInput("IF0").connection.connect(condEq.outputConnection);
-
-    // inside IF3 → print even number
-    const printEven = ws.newBlock("text_print");
-    printEven.initSvg(); printEven.render();
-    if3.getInput("DO0").connection.connect(printEven.previousConnection);
-
-    const txtEven = ws.newBlock("text");
-    txtEven.setFieldValue("Even iteration", "TEXT");
-    txtEven.initSvg(); txtEven.render();
-    printEven.getInput("TEXT").connection.connect(txtEven.outputConnection);
-
-    // After WHILE → final print
-    const finalPrint = ws.newBlock("text_print");
-    finalPrint.initSvg(); finalPrint.render();
-    while1.nextConnection.connect(finalPrint.previousConnection);
-
-    const txtFinal = ws.newBlock("text");
-    txtFinal.setFieldValue("End of large testcase", "TEXT");
-    txtFinal.initSvg(); txtFinal.render();
-    finalPrint.getInput("TEXT").connection.connect(txtFinal.outputConnection);
-
-    return {
-        start,
-        last: finalPrint,
-
-        // exposed blocks
-        if1, repeat1, print1, printRep1,
-        if2, repeat2,
-        while1, if3,
-        finalPrint
-    };
-}
-
 
 function mixColors(color1, color2, amount) {
     function hexToRgb(hex) {
@@ -1374,18 +1022,28 @@ function showToastPromptImpl(message, onConfirm, onCancel) {
   toast.style.right = '20px';
   toast.style.bottom = '20px';
   toast.style.zIndex = 20000;
-  toast.style.background = 'rgba(0,0,0,0.85)';
+  toast.style.background = '#222';
   toast.style.color = '#fff';
-  toast.style.padding = '12px 14px';
-  toast.style.borderRadius = '6px';
-  toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
+  toast.style.padding = '14px 20px';
+  toast.style.borderRadius = '10px';
+  toast.style.boxShadow = '0 6px 20px rgba(0,0,0,0.25)';
   toast.style.fontFamily = 'Arial, sans-serif';
   toast.style.maxWidth = '320px';
+  toast.style.animation = 'fadeIn .3s ease';
   toast.innerHTML = `
     <div class="toast-message" style="margin-bottom:8px">${message}</div>
-    <div class="toast-buttons" style="text-align:right">
-      <button class="toast-cancel" style="margin-right:8px">No</button>
-      <button class="toast-ok">Yes</button>
+    <div class="toast-buttons" style="margin-top: 10px;
+  text-align: right;">
+      <button class="toast-cancel" style="background: #777; margin-left: 10px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;">No</button>
+      <button class="toast-ok" style="background: #4CAF50; color: white; margin-left: 10px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;">Yes</button>
     </div>
   `;
   console.log('showToastPrompt: creating toast');
@@ -1527,141 +1185,7 @@ function updateToolboxForProcedureRename(oldName, newName,workspace) {
   console.log('updateToolboxForProcedureRename: noop (oldName=', oldName, 'newName=', newName, ')');
   return;
 }
-/*
-function insertProcedureCall(group, name, workspace) {
-  const call = workspace.newBlock("procedures_callnoreturn");
-  call.setFieldValue(name, "NAME");
 
-  const literalParams = extractLiteralParameters(group);
-
-  if (literalParams.length > 0) {
-    const mutation = document.createElement("mutation");
-    literalParams.forEach(p => {
-      const arg = document.createElement("arg");
-      arg.setAttribute("name", p.paramName);
-      arg.setAttribute("type", p.type);
-      mutation.appendChild(arg);
-    });
-    call.domToMutation(mutation);
-  }
-
-  call.initSvg();
-  call.render();
-
-  if (literalParams.length > 0) {
-    for (let i = 0; i < literalParams.length; i++) {
-      const p = literalParams[i];
-      const input = call.getInput('ARG' + i);
-      if (!input) continue;
-
-      let litBlock = null;
-      if (p.type === 'Number') {
-        litBlock = workspace.newBlock('math_number');
-        try { litBlock.setFieldValue(String(p.originalValue), 'NUM'); } catch (e) {}
-      } else if (p.type === 'String') {
-        litBlock = workspace.newBlock('text');
-        try { litBlock.setFieldValue(String(p.originalValue), 'TEXT'); } catch (e) {}
-      } else {
-        litBlock = workspace.newBlock('text');
-        try { litBlock.setFieldValue(String(p.originalValue), 'TEXT'); } catch (e) {}
-      }
-
-      if (litBlock) {
-        litBlock.initSvg();
-        litBlock.render();
-        try {
-          if (input.connection && litBlock.outputConnection) {
-            input.connection.connect(litBlock.outputConnection);
-          }
-        } catch (e) {}
-      }
-    }
-  }
-
-  const first = group[0];
-  const last = group[group.length - 1];
-
-  const parent = first.previousConnection?.targetBlock();
-  const next = last.nextConnection?.targetBlock();
-
-  console.log('insertProcedureCall: parent=', parent ? parent.type : null, 'next=', next ? next.type : null);
-
-  let connected = false;
-  try {
-    if (parent && parent.nextConnection && call.previousConnection) {
-      try { parent.nextConnection.connect(call.previousConnection); connected = true; console.log('insertProcedureCall: connected to parent'); } catch (e) { console.warn('insertProcedureCall: failed to connect to parent', e); }
-    }
-  } catch (e) { console.warn('insertProcedureCall: parent connect error', e); }
-
-  try {
-    if (next && call.nextConnection && next.previousConnection) {
-      try { call.nextConnection.connect(next.previousConnection); connected = true; console.log('insertProcedureCall: connected to next'); } catch (e) { console.warn('insertProcedureCall: failed to connect to next', e); }
-    }
-  } catch (e) { console.warn('insertProcedureCall: next connect error', e); }
-
-  // Fallback: if we couldn't connect the call in-place, position it where the first block is
-  if (!connected) {
-    try {
-      if (first && typeof first.getRelativeToSurfaceXY === 'function' && typeof call.getRelativeToSurfaceXY === 'function') {
-        const firstXY = first.getRelativeToSurfaceXY();
-        const callXY = call.getRelativeToSurfaceXY();
-        const dx = firstXY.x - callXY.x;
-        const dy = firstXY.y - callXY.y;
-        call.moveBy(dx, dy);
-        console.log('insertProcedureCall: moved call to first block position');
-      }
-    } catch (e) { console.warn('insertProcedureCall: fallback positioning failed', e); }
-  }
-
-  // Remove the original blocks (attempt to dispose them safely)
-  group.forEach(b => {
-    try {
-      safeDispose(b);
-    } catch (e) {
-      console.error('insertProcedureCall: safeDispose failed for block', b && b.type, e);
-    }
-  });
-
-  // Update the toolbox to show the new procedure
-  updateToolboxForProcedure(name);
-
-  // Update the toolbox to show the new procedure
-  updateToolboxForProcedure(name);
-}
-
-function wipeConnections(block) {
-  if (!block) return;
-
-  if (block.previousConnection && block.previousConnection.targetConnection) {
-    try { block.previousConnection.disconnect(); } catch (e) {}
-  }
-  if (block.nextConnection && block.nextConnection.targetConnection) {
-    try { block.nextConnection.disconnect(); } catch (e) {}
-  }
-
-  block.inputList.forEach(input => {
-    const child = input.connection?.targetBlock();
-    if (child) wipeConnections(child);
-  });
-}
-
-function serializeBlockMinimal(block) {
-  const json = {
-    type: block.type,
-    fields: {},
-  };
-
-  block.inputList.forEach(input => {
-    input.fieldRow.forEach(field => {
-      if (field.name && typeof field.getValue === "function") {
-        json.fields[field.name] = field.getValue();
-      }
-    });
-  });
-
-  return json;
-}
-*/
 // ============================================================================
 // VISUAL HIGHLIGHTING AND DESIGN
 // ============================================================================
@@ -2101,3 +1625,346 @@ function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
   };
 
 });
+/*
+function buildTestCase(ws, offsetX = 30, offsetY = 30) {
+
+    
+    const start = ws.newBlock("robControls_start");
+    start.initSvg(); start.render();
+    start.moveBy(offsetX, offsetY);
+
+    const if1 = ws.newBlock("controls_if");
+    if1.initSvg(); if1.render();
+    start.nextConnection.connect(if1.previousConnection);
+
+    // Condition for IF1
+    const cond1 = ws.newBlock("logic_compare");
+    cond1.initSvg(); cond1.render();
+    if1.getInput("IF0").connection.connect(cond1.outputConnection);
+
+    const numLeft1 = ws.newBlock("math_number");
+    numLeft1.setFieldValue("5", "NUM");
+    numLeft1.initSvg(); numLeft1.render();
+    cond1.getInput("A").connection.connect(numLeft1.outputConnection);
+
+    const numRight1 = ws.newBlock("math_number");
+    numRight1.setFieldValue("10", "NUM");
+    numRight1.initSvg(); numRight1.render();
+    cond1.getInput("B").connection.connect(numRight1.outputConnection);
+
+    // print inside IF1
+    const printInside1 = ws.newBlock("text_print");
+    printInside1.initSvg(); printInside1.render();
+    if1.getInput("DO0").connection.connect(printInside1.previousConnection);
+
+    const txtInside1 = ws.newBlock("text");
+    txtInside1.setFieldValue("This", "TEXT");
+    txtInside1.initSvg(); txtInside1.render();
+    printInside1.getInput("TEXT").connection.connect(txtInside1.outputConnection);
+
+
+    // REPEAT1
+    const repeat1 = ws.newBlock("controls_repeat_ext");
+    repeat1.initSvg(); repeat1.render();
+    if1.nextConnection.connect(repeat1.previousConnection);
+
+    const repeatCount1 = ws.newBlock("math_number");
+    repeatCount1.setFieldValue("3", "NUM");
+    repeatCount1.initSvg(); repeatCount1.render();
+    repeat1.getInput("TIMES").connection.connect(repeatCount1.outputConnection);
+
+    // print inside REPEAT1
+    const print2 = ws.newBlock("text_print");
+    print2.initSvg(); print2.render();
+    repeat1.getInput("DO").connection.connect(print2.previousConnection);
+
+    const txt2_1 = ws.newBlock("text");
+    txt2_1.setFieldValue("is", "TEXT");
+    txt2_1.initSvg(); txt2_1.render();
+    print2.getInput("TEXT").connection.connect(txt2_1.outputConnection);
+
+    // print AFTER REPEAT1
+    const print3 = ws.newBlock("text_print");
+    print3.initSvg(); print3.render();
+    repeat1.nextConnection.connect(print3.previousConnection);
+
+    const txt3_1 = ws.newBlock("text");
+    txt3_1.setFieldValue("a testcase", "TEXT");
+    txt3_1.initSvg(); txt3_1.render();
+    print3.getInput("TEXT").connection.connect(txt3_1.outputConnection);
+
+
+    
+    const offsetY2 = offsetY + 250; // shift down
+
+    const if2 = ws.newBlock("controls_if");
+    if2.initSvg(); if2.render();
+    print3.nextConnection.connect(if2.previousConnection);
+
+    if2.moveBy(0, 200);  // push second sequence lower
+
+
+    // Condition for IF2
+    const cond2 = ws.newBlock("logic_compare");
+    cond2.initSvg(); cond2.render();
+    if2.getInput("IF0").connection.connect(cond2.outputConnection);
+
+    const numLeft2 = ws.newBlock("math_number");
+    numLeft2.setFieldValue("20", "NUM");
+    numLeft2.initSvg(); numLeft2.render();
+    cond2.getInput("A").connection.connect(numLeft2.outputConnection);
+
+    const numRight2 = ws.newBlock("math_number");
+    numRight2.setFieldValue("15", "NUM");
+    numRight2.initSvg(); numRight2.render();
+    cond2.getInput("B").connection.connect(numRight2.outputConnection);
+
+
+    // print inside IF2
+    const printInside2 = ws.newBlock("text_print");
+    printInside2.initSvg(); printInside2.render();
+    if2.getInput("DO0").connection.connect(printInside2.previousConnection);
+
+    const txtInside2 = ws.newBlock("text");
+    txtInside2.setFieldValue("because", "TEXT");
+    txtInside2.initSvg(); txtInside2.render();
+    printInside2.getInput("TEXT").connection.connect(txtInside2.outputConnection);
+
+
+    // REPEAT2
+    const repeat2 = ws.newBlock("controls_repeat_ext");
+    repeat2.initSvg(); repeat2.render();
+    if2.nextConnection.connect(repeat2.previousConnection);
+
+    const repeatCount2 = ws.newBlock("math_number");
+    repeatCount2.setFieldValue("2", "NUM");
+    repeatCount2.initSvg(); repeatCount2.render();
+    repeat2.getInput("TIMES").connection.connect(repeatCount2.outputConnection);
+
+    // print inside REPEAT2
+    const print4 = ws.newBlock("text_print");
+    print4.initSvg(); print4.render();
+    repeat2.getInput("DO").connection.connect(print4.previousConnection);
+
+    const txt4 = ws.newBlock("text");
+    txt4.setFieldValue("we are", "TEXT");
+    txt4.initSvg(); txt4.render();
+    print4.getInput("TEXT").connection.connect(txt4.outputConnection);
+
+    // print AFTER REPEAT2
+    const print5 = ws.newBlock("text_print");
+    print5.initSvg(); print5.render();
+    repeat2.nextConnection.connect(print5.previousConnection);
+
+    const txt5 = ws.newBlock("text");
+    txt5.setFieldValue("bored", "TEXT");
+    txt5.initSvg(); txt5.render();
+    print5.getInput("TEXT").connection.connect(txt5.outputConnection);
+
+
+    return {
+        start,
+        last: print5,
+
+        // first chain
+        if1, repeat1, printInside1, print2, print3,
+
+        // second chain
+        if2, repeat2, printInside2, print4, print5
+    };
+}
+
+function buildLargeTestCase(ws, offsetX = 30, offsetY = 30) {
+
+    
+    const start = ws.newBlock("robControls_start");
+    start.initSvg(); start.render();
+    start.moveBy(offsetX, offsetY);
+
+    const if1 = ws.newBlock("controls_if");
+    if1.initSvg(); if1.render();
+    start.nextConnection.connect(if1.previousConnection);
+
+    // IF1 condition (5 < 10)
+    const cond1 = ws.newBlock("logic_compare");
+    cond1.initSvg(); cond1.render();
+    if1.getInput("IF0").connection.connect(cond1.outputConnection);
+
+    const num1A = ws.newBlock("math_number");
+    num1A.setFieldValue("5", "NUM");
+    num1A.initSvg(); num1A.render();
+    cond1.getInput("A").connection.connect(num1A.outputConnection);
+
+    const num1B = ws.newBlock("math_number");
+    num1B.setFieldValue("10", "NUM");
+    num1B.initSvg(); num1B.render();
+    cond1.getInput("B").connection.connect(num1B.outputConnection);
+
+    // Console print
+    const print1 = ws.newBlock("text_print");
+    print1.initSvg(); print1.render();
+    if1.getInput("DO0").connection.connect(print1.previousConnection);
+
+    const txt1 = ws.newBlock("text");
+    txt1.setFieldValue("Start of Large Testcase", "TEXT");
+    txt1.initSvg(); txt1.render();
+    print1.getInput("TEXT").connection.connect(txt1.outputConnection);
+
+    // REPEAT 4
+    const repeat1 = ws.newBlock("controls_repeat_ext");
+    repeat1.initSvg(); repeat1.render();
+    if1.nextConnection.connect(repeat1.previousConnection);
+
+    const repeatCount1 = ws.newBlock("math_number");
+    repeatCount1.setFieldValue("4", "NUM");
+    repeatCount1.initSvg(); repeatCount1.render();
+    repeat1.getInput("TIMES").connection.connect(repeatCount1.outputConnection);
+
+    // inside REPEAT1 → print
+    const printRep1 = ws.newBlock("text_print");
+    printRep1.initSvg(); printRep1.render();
+    repeat1.getInput("DO").connection.connect(printRep1.previousConnection);
+
+    const txtRep1 = ws.newBlock("text");
+    txtRep1.setFieldValue("Looping...", "TEXT");
+    txtRep1.initSvg(); txtRep1.render();
+    printRep1.getInput("TEXT").connection.connect(txtRep1.outputConnection);
+
+
+    
+
+    const repeat2 = ws.newBlock("controls_repeat_ext");
+    repeat2.initSvg(); repeat2.render();
+    repeat1.nextConnection.connect(repeat2.previousConnection);
+
+    const repeatCount2 = ws.newBlock("math_number");
+    repeatCount2.setFieldValue("3", "NUM");
+    repeatCount2.initSvg(); repeatCount2.render();
+    repeat2.getInput("TIMES").connection.connect(repeatCount2.outputConnection);
+
+    // inside REPEAT2 → IF
+    const if2 = ws.newBlock("controls_if");
+    if2.initSvg(); if2.render();
+    repeat2.getInput("DO").connection.connect(if2.previousConnection);
+
+    // IF2 condition = (20 > 15 AND TRUE)
+    const logicAnd = ws.newBlock("logic_operation");
+    logicAnd.setFieldValue("AND", "OP");
+    logicAnd.initSvg(); logicAnd.render();
+    if2.getInput("IF0").connection.connect(logicAnd.outputConnection);
+
+    const condLeft = ws.newBlock("logic_compare");
+    condLeft.initSvg(); condLeft.render();
+    logicAnd.getInput("A").connection.connect(condLeft.outputConnection);
+
+    const num2A = ws.newBlock("math_number");
+    num2A.setFieldValue("20", "NUM");
+    num2A.initSvg(); num2A.render();
+    condLeft.getInput("A").connection.connect(num2A.outputConnection);
+
+    const num2B = ws.newBlock("math_number");
+    num2B.setFieldValue("15", "NUM");
+    num2B.initSvg(); num2B.render();
+    condLeft.getInput("B").connection.connect(num2B.outputConnection);
+
+    const boolTrue = ws.newBlock("logic_boolean");
+    boolTrue.setFieldValue("TRUE", "BOOL");
+    boolTrue.initSvg(); boolTrue.render();
+    logicAnd.getInput("B").connection.connect(boolTrue.outputConnection);
+
+    // inside IF2 → print
+    const printInside2 = ws.newBlock("text_print");
+    printInside2.initSvg(); printInside2.render();
+    if2.getInput("DO0").connection.connect(printInside2.previousConnection);
+
+    const txtInside2 = ws.newBlock("text");
+    txtInside2.setFieldValue("Nested IF triggered", "TEXT");
+    txtInside2.initSvg(); txtInside2.render();
+    printInside2.getInput("TEXT").connection.connect(txtInside2.outputConnection);
+
+
+    
+
+    const while1 = ws.newBlock("controls_whileUntil");
+    while1.setFieldValue("WHILE", "MODE");
+    while1.initSvg(); while1.render();
+    repeat2.nextConnection.connect(while1.previousConnection);
+
+    // While condition = (counter < 5)
+    const condWhile = ws.newBlock("logic_compare");
+    condWhile.initSvg(); condWhile.render();
+    while1.getInput("BOOL").connection.connect(condWhile.outputConnection);
+
+    const counterVar = ws.newBlock("variables_get");
+    counterVar.setFieldValue("counter", "VAR");
+    counterVar.initSvg(); counterVar.render();
+    condWhile.getInput("A").connection.connect(counterVar.outputConnection);
+
+    const num5 = ws.newBlock("math_number");
+    num5.setFieldValue("5", "NUM");
+    num5.initSvg(); num5.render();
+    condWhile.getInput("B").connection.connect(num5.outputConnection);
+
+    // inside WHILE → another IF
+    const if3 = ws.newBlock("controls_if");
+    if3.initSvg(); if3.render();
+    while1.getInput("DO").connection.connect(if3.previousConnection);
+
+    // IF3 condition counter % 2 == 0
+    const mathMod = ws.newBlock("math_modulo");
+    mathMod.initSvg(); mathMod.render();
+    if3.getInput("IF0").connection.connect(mathMod.outputConnection);
+
+    const varMod = ws.newBlock("variables_get");
+    varMod.setFieldValue("counter", "VAR");
+    varMod.initSvg(); varMod.render();
+    mathMod.getInput("DIVIDEND").connection.connect(varMod.outputConnection);
+
+    const num2 = ws.newBlock("math_number");
+    num2.setFieldValue("2", "NUM");
+    num2.initSvg(); num2.render();
+    mathMod.getInput("DIVISOR").connection.connect(num2.outputConnection);
+
+    const num0 = ws.newBlock("math_number");
+    num0.setFieldValue("0", "NUM");
+    num0.initSvg(); num0.render();
+
+    const condEq = ws.newBlock("logic_compare");
+    condEq.initSvg(); condEq.render();
+    condEq.getInput("A").connection.connect(mathMod.outputConnection);
+    condEq.getInput("B").connection.connect(num0.outputConnection);
+    if3.getInput("IF0").connection.disconnect();
+    if3.getInput("IF0").connection.connect(condEq.outputConnection);
+
+    // inside IF3 → print even number
+    const printEven = ws.newBlock("text_print");
+    printEven.initSvg(); printEven.render();
+    if3.getInput("DO0").connection.connect(printEven.previousConnection);
+
+    const txtEven = ws.newBlock("text");
+    txtEven.setFieldValue("Even iteration", "TEXT");
+    txtEven.initSvg(); txtEven.render();
+    printEven.getInput("TEXT").connection.connect(txtEven.outputConnection);
+
+    // After WHILE → final print
+    const finalPrint = ws.newBlock("text_print");
+    finalPrint.initSvg(); finalPrint.render();
+    while1.nextConnection.connect(finalPrint.previousConnection);
+
+    const txtFinal = ws.newBlock("text");
+    txtFinal.setFieldValue("End of large testcase", "TEXT");
+    txtFinal.initSvg(); txtFinal.render();
+    finalPrint.getInput("TEXT").connection.connect(txtFinal.outputConnection);
+
+    return {
+        start,
+        last: finalPrint,
+
+        // exposed blocks
+        if1, repeat1, print1, printRep1,
+        if2, repeat2,
+        while1, if3,
+        finalPrint
+    };
+}
+*/

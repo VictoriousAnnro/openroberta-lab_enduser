@@ -292,40 +292,6 @@ function runOnBrick(programName, configName, xmlTextProgram, xmlTextConfig, SSID
     );
 }
 
-//newmethod
-/**
- * Run program NEW
- *
- * @param programName
- *            {String} - name of the program
- * @param configName
- *            {String } - name of the robot configuration
- * @param xmlTextProgram
- *            {String} - XML representation of the program
- * @param xmlTextConfig
- *            {String} - XML representation of the robot configuration
- * @param SSID
- *            {String} - WLAN SSID for WiFi enabled robots
- * @param password
- *            {String} - WLAN password for WiFi enabled robots
- */
-function newRunBrick(programName, configName, xmlTextProgram, xmlTextConfig, SSID, password, language, successFn) {
-    COMM.json(
-        '/projectWorkflow/newRun', //IMPORTANT!! Here we specify what method to call in ProjectWorkflowRestController.java
-        {
-            programName: programName,
-            configurationName: configName,
-            progXML: xmlTextProgram,
-            confXML: xmlTextConfig,
-            SSID: SSID,
-            password: password,
-            language: language,
-        },
-        successFn,
-        "run program '" + programName + "' with configuration '" + configName + "'"
-    );
-}
-
 /**
  * Stop program
  */
@@ -497,7 +463,6 @@ export {
     refreshList,
     showSourceProgram,
     runOnBrick,
-    newRunBrick,
     runInSim,
     runNative,
     compileN,
