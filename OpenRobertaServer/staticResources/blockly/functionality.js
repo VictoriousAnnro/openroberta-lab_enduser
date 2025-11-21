@@ -22,9 +22,11 @@
  */
 
 var customFunctionRegistry = {};
-var toastPromptShown = false;
-
-
+var structuralFunctionRegistry = {};
+var promptedSignatures = new Set();
+var rejectedSignatures = new Set();
+const usedNames = new Set();
+let globalParamCounter = 0;
 
 
   function showToastPrompt(message, onConfirm, onCancel) {
@@ -187,75 +189,107 @@ function safeCloneBlock(block, workspace) {
 
 // 
 
-function insertProcedureCall(group, name,workspace) {
-    const call = workspace.newBlock("customProcedures_callnoreturn");
-    call.setFieldValue(name, "NAME");
+function insertProcedureCall(group, name, workspace, canonicalParams) {
+  console.log('insertProcedureCall: Native XML Mode for ' + name);
 
-    const literalParams = extractLiteralParameters(group);
+  // 1. Extract parameters to determine required inputs
+  let literalParams = extractLiteralParameters(group, workspace);
+  literalParams = applyCanonicalParamNames(literalParams, canonicalParams);
 
+    // 2. Build XML for the Native Call Block
+    // This guarantees the block initializes with the correct argument slots immediately.
+    let xmlString = '<block type="robProcedures_callnoreturn">';
+    
+    // The Mutation tag defines the arguments
+    xmlString += `<mutation name="${name}">`;
     if (literalParams.length > 0) {
-        const mutation = document.createElement("mutation");
         literalParams.forEach(p => {
-            const arg = document.createElement("arg");
-            arg.setAttribute("name", p.paramName);
-            // pass type as well (customProcedures_callnoreturn will ignore unknown attrs if necessary)
-            arg.setAttribute("type", p.type);
-            mutation.appendChild(arg);
+            // Capitalize type to match Definition: "Number", "Boolean", "String"
+            let type = p.type.charAt(0).toUpperCase() + p.type.slice(1).toLowerCase();
+            xmlString += `<arg name="${p.paramName}" type="${type}"></arg>`;
         });
-        call.domToMutation(mutation);
     }
+    xmlString += '</mutation>';
+    
+    // Set the visual name
+    xmlString += `<field name="NAME">${name}</field>`;
+    xmlString += '</block>';
 
+    // 3. Create the Block from XML
+    const parser = new DOMParser();
+    const xmlDom = parser.parseFromString(xmlString, "text/xml").documentElement;
+    const call = Blockly.Xml.domToBlock(xmlDom, workspace);
+    
     call.initSvg();
     call.render();
 
-    // If we have literal parameters, plug them into the call's argument inputs
+    // 4. Plug in the Parameter Values
+    // We created slots ARG0, ARG1... now we fill them with shadow blocks (values)
     if (literalParams.length > 0) {
         for (let i = 0; i < literalParams.length; i++) {
             const p = literalParams[i];
             const input = call.getInput('ARG' + i);
-            if (!input) continue;
+            
+            if (input) {
+                // Create a value block based on the parameter type
+                let valBlock = null;
+                
+                if (p.type === 'Number') {
+                    valBlock = workspace.newBlock('math_number');
+                    try { valBlock.setFieldValue(String(p.originalValue), 'NUM'); } catch (e) {}
+                } else if (p.type === 'String') {
+                    valBlock = workspace.newBlock('text');
+                    try { valBlock.setFieldValue(String(p.originalValue), 'TEXT'); } catch (e) {}
+                } else if (p.type === 'Boolean') {
+                    valBlock = workspace.newBlock('logic_boolean');
+                    try { 
+                        let boolVal = String(p.originalValue).toUpperCase();
+                        if (boolVal !== 'TRUE' && boolVal !== 'FALSE') boolVal = 'TRUE';
+                        valBlock.setFieldValue(boolVal, 'BOOL'); 
+                    } catch (e) {}
+                }
 
-            // Create a simple literal/shadow block according to type
-            let litBlock = null;
-            if (p.type === 'Number') {
-                litBlock = workspace.newBlock('math_number');
-                try { litBlock.setFieldValue(String(p.originalValue), 'NUM'); } catch (e) {}
-            } else if (p.type === 'String') {
-                litBlock = workspace.newBlock('text');
-                try { litBlock.setFieldValue(String(p.originalValue), 'TEXT'); } catch (e) {}
-            } else {
-                // Fallback: create a text shadow with stringified value
-                litBlock = workspace.newBlock('text');
-                try { litBlock.setFieldValue(String(p.originalValue), 'TEXT'); } catch (e) {}
-            }
-
-            if (litBlock) {
-                litBlock.initSvg();
-                litBlock.render();
-                try {
-                    if (input.connection && litBlock.outputConnection) {
-                        input.connection.connect(litBlock.outputConnection);
+                // Connect the value block
+                if (valBlock) {
+                    valBlock.initSvg();
+                    valBlock.render();
+                    if (valBlock.outputConnection) {
+                        input.connection.connect(valBlock.outputConnection);
                     }
-                } catch (e) {}
+                }
             }
         }
     }
 
-
+    // 5. Insert the Call Block into the sequence flow
     const first = group[0];
     const last = group[group.length - 1];
 
     const parent = first.previousConnection?.targetBlock();
     const next   = last.nextConnection?.targetBlock();
 
-    if (parent?.nextConnection) {
-        parent.nextConnection.connect(call.previousConnection);
+    // Connect to Top (Parent)
+    if (parent) {
+         // 1. Check if we are connected to a Next connection (Flow)
+         if (parent.nextConnection && first.previousConnection && 
+             parent.nextConnection.targetConnection === first.previousConnection) {
+             parent.nextConnection.connect(call.previousConnection);
+         } 
+         // 2. Check if we are inside a Statement Input (e.g., Inside an IF loop)
+         else {
+             const parentInput = first.previousConnection.targetConnection;
+             if (parentInput) {
+                 parentInput.connect(call.previousConnection);
+             }
+         }
     }
 
+    // Connect to Bottom (Next Block)
     if (next) {
         call.nextConnection.connect(next.previousConnection);
     }
 
+    // 6. Dispose of the old blocks (The ones we just replaced)
     group.forEach(b => safeDispose(b));
 }
 // Remove any accidental auto-connections so Blockly doesn't reorder things.
@@ -349,6 +383,15 @@ function mixColors(color1, color2, amount) {
 }
 
 
+// Utility to purge plain objects that track detection state.
+function clearObjectStore(store) {
+  if (!store) {
+    return;
+  }
+  Object.keys(store).forEach(key => delete store[key]);
+}
+
+
 
 function runTest() {
          
@@ -377,622 +420,432 @@ function run2ndTest() {
     console.log("Test done");
 }
 
-// ============================================================================
-// BLOCK DEFINITIONS
-// ============================================================================
-
-/**
- * Define the robProcedures_mutatorarg block with parameter type support
- */
-Blockly.Blocks['robProcedures_mutatorarg'] = {
-  init: function() {
-    var typeOptions = [
-      ['Number', 'Number'],
-      ['Boolean', 'Boolean'],
-      ['String', 'String'],
-      ['Colour', 'Colour'],
-      ['Image', 'Image'],
-      ['List Number', 'List Number'],
-      ['List Boolean', 'List Boolean'],
-      ['List String', 'List String'],
-      ['List Colour', 'List Colour'],
-      ['List Image', 'List Image']
-    ];
-    
-    this.appendDummyInput()
-        .appendField('argument:')
-        .appendField(new Blockly.FieldTextInput('x', this.validator_), 'NAME')
-        .appendField(new Blockly.FieldDropdown(typeOptions), 'VARTYPE');
-    this.setPreviousStatement(true);
-    this.setNextStatement(true);
-    this.setColour(Blockly.CAT_PROCEDURE_RGB);
-    this.setTooltip('Argument for a custom block');
-    this.contextMenu = false;
-  },
-  validator_: function(newVar) {
-    newVar = newVar.replace(/[\s\xa0]+/g, ' ').replace(/^ | $/g, '');
-    return newVar || null;
-  },
-  mutationToDom: function() {
-    var container = document.createElement('mutation');
-    var vartype = this.getFieldValue('VARTYPE');
-    if (vartype) {
-      container.setAttribute('vartype', vartype);
-    }
-    return container;
-  },
-  domToMutation: function(xmlElement) {
-    var vartype = xmlElement.getAttribute('vartype');
-    if (vartype) {
-      this.setFieldValue(vartype, 'VARTYPE');
-    }
-  }
-};
-
-/**
- * Define the procedures_mutatorcontainer block
- */
-Blockly.Blocks['procedures_mutatorcontainer'] = {
-  init: function() {
-    this.appendDummyInput()
-        .appendField('Arguments');
-    this.appendStatementInput('STACK');
-    this.setColour(Blockly.CAT_PROCEDURE_RGB);
-    this.setTooltip('Add parameters to your custom block');
-    this.contextMenu = false;
-  }
-};
-
-/**
- * Custom procedure definition block with proper type support
- */
-Blockly.Blocks['customProcedures_defnoreturn'] = {
-  init: function() {
-    this.setHelpUrl(Blockly.Msg.PROCEDURES_DEFNORETURN_HELPURL);
-    this.setColour(Blockly.CAT_PROCEDURE_RGB);
-    var name = Blockly.Procedures.findLegalName(Blockly.Msg.PROCEDURES_DEFNORETURN_PROCEDURE, this);
-    var nameField = new Blockly.FieldTextInput(name, Blockly.Procedures.rename);
-    nameField.setSpellcheck(false);
-    this.appendDummyInput()
-        .appendField(Blockly.Msg.PROCEDURES_DEFNORETURN_TITLE)
-        .appendField(nameField, 'NAME')
-        .appendField('', 'PARAMS');
-    this.appendStatementInput('STACK')
-        .appendField(Blockly.Msg.PROCEDURES_DEFNORETURN_DO);
-    this.setMutator(new Blockly.Mutator(['robProcedures_mutatorarg']));
-    this.setTooltip(Blockly.Msg.PROCEDURES_DEFNORETURN_TOOLTIP);
-    this.arguments_ = [];
-    this.argumentsTypes_ = [];
-  },
-  getProcedureDef: function() {
-    return [this.getFieldValue('NAME'), this, false];
-  },
-  mutationToDom: function() {
-    var container = document.createElement('mutation');
-    container.setAttribute('name', this.getFieldValue('NAME'));
-    for (var i = 0; i < this.arguments_.length; i++) {
-      var parameter = document.createElement('arg');
-      parameter.setAttribute('name', this.arguments_[i]);
-      parameter.setAttribute('type', this.argumentsTypes_[i] || 'Number');
-      container.appendChild(parameter);
-    }
-    return container;
-  },
-  domToMutation: function(xmlElement) {
-    this.arguments_ = [];
-    this.argumentsTypes_ = [];
-    for (var i = 0, childNode; (childNode = xmlElement.childNodes[i]); i++) {
-      if (childNode.nodeName.toLowerCase() == 'arg') {
-        this.arguments_.push(childNode.getAttribute('name'));
-        this.argumentsTypes_.push(childNode.getAttribute('type') || 'Number');
-      }
-    }
-    this.updateParams_();
-  },
-  getVars: function() {
-    return this.arguments_;
-  },
-  renameVar: function(oldName, newName) {
-    for (var i = 0; i < this.arguments_.length; i++) {
-      if (Blockly.Names.equals(oldName, this.arguments_[i])) {
-        this.arguments_[i] = newName;
-      }
-    }
-  },
-  updateParams_: function() {
-    var params = '';
-    if (this.arguments_.length) {
-      params = ' ' + Blockly.Msg.PROCEDURES_BEFORE_PARAMS +
-          ' ' + this.arguments_.join(', ');
-    }
-    this.setFieldValue(params, 'PARAMS');
-  },
-  updateShape_: function(mutatorRoot) {
-        this.arguments_ = [];
-        this.argumentsTypes_ = [];
-
-        var containerBlock = null;
-        if (mutatorRoot && typeof mutatorRoot.getInputTargetBlock === 'function') {
-            containerBlock = mutatorRoot;
-        } else if (mutatorRoot && typeof mutatorRoot.getTopBlocks === 'function') {
-            var tops = mutatorRoot.getTopBlocks(true);
-            for (var t = 0; t < tops.length; t++) {
-                if (tops[t].type === 'procedures_mutatorcontainer') {
-                    containerBlock = tops[t];
-                    break;
-                }
-            }
-            if (!containerBlock && tops.length) containerBlock = tops[0];
-        }
-
-        if (containerBlock) {
-            var childBlock = containerBlock.getInputTargetBlock('STACK');
-            while (childBlock) {
-                this.arguments_.push(childBlock.getFieldValue('NAME'));
-                this.argumentsTypes_.push(childBlock.getFieldValue('VARTYPE') || 'Number');
-                childBlock = childBlock.getNextBlock();
-            }
-        }
-
-        this.updateParams_();
-  },
-  decompose: function(workspace) {
-    var containerBlock = workspace.newBlock('procedures_mutatorcontainer');
-    containerBlock.initSvg();
-
-    var connection = containerBlock.getInput('STACK').connection;
-    for (var i = 0; i < this.arguments_.length; i++) {
-        var paramBlock = workspace.newBlock('robProcedures_mutatorarg');
-        paramBlock.initSvg();
-        paramBlock.setFieldValue(this.arguments_[i], 'NAME');
-        paramBlock.setFieldValue(this.argumentsTypes_[i] || 'Number', 'VARTYPE');
-        paramBlock.oldLocation = i;
-        connection.connect(paramBlock.previousConnection);
-        connection = paramBlock.nextConnection;
-    }
-    if (Blockly.Procedures && Blockly.Procedures.mutateCallers) {
-        Blockly.Procedures.mutateCallers(this);
-    }
-    return containerBlock;
-  },
-  compose: function(containerBlockOrWorkspace) {
-    var containerBlock = containerBlockOrWorkspace;
-    if (containerBlockOrWorkspace && typeof containerBlockOrWorkspace.getTopBlocks === 'function') {
-        var tops = containerBlockOrWorkspace.getTopBlocks(true);
-        for (var t = 0; t < tops.length; t++) {
-            if (tops[t].type === 'procedures_mutatorcontainer') {
-                containerBlock = tops[t];
-                break;
-            }
-        }
-        if (!containerBlock && tops.length) containerBlock = tops[0];
-    }
-
-    this.arguments_ = [];
-    this.argumentsTypes_ = [];
-    var paramBlock = containerBlock && containerBlock.getInputTargetBlock && containerBlock.getInputTargetBlock('STACK');
-    while (paramBlock) {
-        this.arguments_.push(paramBlock.getFieldValue('NAME'));
-        this.argumentsTypes_.push(paramBlock.getFieldValue('VARTYPE') || 'Number');
-        paramBlock = paramBlock.nextConnection && paramBlock.nextConnection.targetBlock();
-    }
-    this.updateParams_();
-    if (Blockly.Procedures && Blockly.Procedures.mutateCallers) {
-        Blockly.Procedures.mutateCallers(this);
-    }
-  },
-  saveConnections: function(containerBlockOrWorkspace) {
-    var containerBlock = containerBlockOrWorkspace;
-    if (containerBlockOrWorkspace && typeof containerBlockOrWorkspace.getTopBlocks === 'function') {
-        var tops = containerBlockOrWorkspace.getTopBlocks(true);
-        for (var t = 0; t < tops.length; t++) {
-            if (tops[t].type === 'procedures_mutatorcontainer') {
-                containerBlock = tops[t];
-                break;
-            }
-        }
-        if (!containerBlock && tops.length) containerBlock = tops[0];
-    }
-
-    var paramBlock = containerBlock && containerBlock.getInputTargetBlock && containerBlock.getInputTargetBlock('STACK');
-    var i = 0;
-    while (paramBlock) {
-        var input = this.getInput && this.getInput('ARG' + i);
-        if (input) {
-            try {
-                paramBlock.valueConnection_ = input && input.connection && input.connection.targetConnection;
-            } catch (e) {
-                paramBlock.valueConnection_ = null;
-            }
-        }
-        i++;
-        paramBlock = paramBlock.nextConnection && paramBlock.nextConnection.targetBlock();
-    }
-  }
-};
-
-/**
- * Custom procedure call block
- */
-Blockly.Blocks['customProcedures_callnoreturn'] = {
-  init: function() {
-    this.appendDummyInput('TOPROW')
-        .appendField(new Blockly.FieldTextInput(''), 'NAME');
-    this.setPreviousStatement(true);
-    this.setNextStatement(true);
-    this.setColour(Blockly.CAT_PROCEDURE_RGB);
-    this.setHelpUrl(Blockly.Msg.PROCEDURES_CALLNORETURN_HELPURL);
-    this.arguments_ = [];
-    this.argumentTypes_ = [];
-  },
-  getProcedureCall: function() {
-    return this.getFieldValue('NAME');
-  },
-  renameProcedure: function(oldName, newName) {
-    if (Blockly.Names.equals(oldName, this.getProcedureCall())) {
-      this.setFieldValue(newName, 'NAME');
-    }
-  },
-  mutationToDom: function() {
-    var container = document.createElement('mutation');
-    container.setAttribute('name', this.getProcedureCall());
-    for (var i = 0; i < this.arguments_.length; i++) {
-      var parameter = document.createElement('arg');
-      parameter.setAttribute('name', this.arguments_[i]);
-      container.appendChild(parameter);
-    }
-    return container;
-  },
-  domToMutation: function(xmlElement) {
-    var name = xmlElement.getAttribute('name');
-    this.setFieldValue(name, 'NAME');
-    this.arguments_ = [];
-    for (var i = 0, childNode; (childNode = xmlElement.childNodes[i]); i++) {
-      if (childNode.nodeName.toLowerCase() == 'arg') {
-        this.arguments_.push(childNode.getAttribute('name'));
-      }
-    }
-    this.updateShape_();
-  },
-  updateShape_: function() {
-    for (var i = 0; i < this.arguments_.length; i++) {
-      var field = this.getField('ARG' + i);
-      if (field) {
-        field.dispose();
-      }
-    }
-    for (var i = 0; i < this.arguments_.length; i++) {
-      var field = this.appendValueInput('ARG' + i)
-          .appendField(this.arguments_[i])
-          .setAlign(Blockly.ALIGN_RIGHT);
-      field.init();
-    }
-    if (this.rendered) {
-      this.render();
-    }
-  },
-  getVars: function() {
-    return this.arguments_;
-  }
-};
 
 /**
  * Extract all literal parameter occurrences from a block group
  */
-function extractLiteralParameters(group) {
-  const params = [];
-  let counter = 1;
 
-  function addParamOccurrence(type, originalValue) {
-    const name = 'param' + counter++;
-    params.push({ paramName: name, type: type, originalValue: originalValue, used: false });
-    return name;
+function extractLiteralParameters(group, workspace) {
+  console.log('Extracting literal parameters from group:', group);
+  const params = [];
+  
+  // Reset per-run state so each extracted function starts with a fresh local counter
+  usedNames.clear();
+
+  if (workspace) {
+    // A. Check standard global variables
+    if (workspace.getAllVariables) {
+      workspace.getAllVariables().forEach(v => usedNames.add(v.name));
+    }
+
+    // B. Scan existing function definitions for THEIR parameters
+    if (workspace.getBlocksByType) {
+       const procedures = workspace.getBlocksByType('robProcedures_defnoreturn');
+       procedures.forEach(p => {
+           if (p.getProcedureDef) {
+               const def = p.getProcedureDef();
+               if (def[1] && Array.isArray(def[1])) {
+                   def[1].forEach(paramName => usedNames.add(paramName));
+               }
+           }
+       });
+    }
   }
 
+  // 2. Naming Strategy: Strictly x, x2, x3, x4...
+  // We remove the alphabetical array to ensure consistency with the definition block.
+  let paramCounter = 0;
+
+  function addParamOccurrence(type, originalValue) {
+    globalParamCounter++;
+    paramCounter++;
+    
+    // Generate candidate name: x, x2, x3, x4...
+    let candidateName = (globalParamCounter === 1) ? 'x' : ('x' + globalParamCounter);
+
+    // 3. Collision Resolution
+    // If 'x' or 'x2' is already a global variable, skip it and keep incrementing
+    // until we find a free name. This ensures we don't get a mismatch.
+    while (usedNames.has(candidateName)) {
+      globalParamCounter++;
+      candidateName = 'x' + globalParamCounter;
+    }
+    
+    // Reserve this name so the next parameter in *this* function doesn't use it
+    usedNames.add(candidateName);
+
+    params.push({ paramName: candidateName, type: type, originalValue: originalValue, used: false });
+    return candidateName;
+  }
+
+  // Standard traversal
   function traverseBlock(b) {
     if (!b) return;
-
-    // Extract field values from print blocks (text_print, etc.)
-    if (b.type === 'text_print') {
-      b.inputList.forEach(input => {
-        input.fieldRow.forEach(field => {
-          if (field.name && typeof field.getValue === 'function') {
-            const v = field.getValue();
-            if (v !== undefined && v !== null && v !== '') {
-              addParamOccurrence('String', v);
-            }
-          }
-        });
-      });
-    }
 
     b.inputList.forEach(input => {
       if (input.connection) {
         const child = input.connection.targetBlock && input.connection.targetBlock();
         if (child) {
-          try {
-            if (child.type === 'math_number') {
-              const v = child.getFieldValue && child.getFieldValue('NUM');
-              if (v !== undefined && v !== null) addParamOccurrence('Number', v);
-            } else if (child.type === 'text') {
-              const v = child.getFieldValue && child.getFieldValue('TEXT');
-              if (v !== undefined && v !== null) addParamOccurrence('String', v);
-            } else if (child.type === 'logic_boolean') {
-              const v = child.getFieldValue && child.getFieldValue('BOOL');
-              if (v !== undefined && v !== null) addParamOccurrence('Boolean', v);
-            } else {
-              // Recursively traverse all child blocks
-              traverseBlock(child);
-              // Also traverse next blocks in the chain
-              let nextBlock = child.getNextBlock();
-              while (nextBlock) {
-                traverseBlock(nextBlock);
-                nextBlock = nextBlock.getNextBlock();
-              }
+            // Check Number
+            if (child.type === 'math_number' || child.type === 'math_integer') {
+                 const v = child.getFieldValue('NUM');
+                 if (v != null) addParamOccurrence('Number', v);
+            } 
+            // Check String
+            else if (child.type === 'text') {
+                 const v = child.getFieldValue('TEXT');
+                 if (v != null) addParamOccurrence('String', v);
             }
-          } catch (e) {}
+            // Check Boolean
+            else if (child.type === 'logic_boolean') {
+                 const v = child.getFieldValue('BOOL');
+                 if (v != null) addParamOccurrence('Boolean', v);
+            } 
+            else {
+              traverseBlock(child);
+              let nextBlock = child.getNextBlock();
+              while (nextBlock) { traverseBlock(nextBlock); nextBlock = nextBlock.getNextBlock(); }
+            }
         }
       }
     });
   }
 
-  group.forEach(rootBlock => {
-    traverseBlock(rootBlock);
-  });
-
+  group.forEach(rootBlock => traverseBlock(rootBlock));
   return params;
 }
 
 /**
  * Create a custom function from a selected block sequence
  */
-function createCustomBlockFromSequence(groups,workspace) {
-  console.log('createCustomBlockFromSequence: invoked, groups length=', groups ? groups.length : 0);
-  // Ensure we have a workspace reference. Older code assumed a global `workspace` variable.
+function createCustomBlockFromSequence(groups, workspace) {
+  console.log('createCustomBlockFromSequence: Native DOM Trigger Mode');
   
-
   const primaryGroup = groups[0];
   const signature = getSequenceSignature(primaryGroup);
+  const structuralSignature = getStructuralSequenceSignature(primaryGroup);
 
   if (customFunctionRegistry[signature]) {
-    const name = customFunctionRegistry[signature];
+    const existingEntry = customFunctionRegistry[signature];
+    const existingName = typeof existingEntry === 'string' ? existingEntry : existingEntry.name;
+    const existingParams = typeof existingEntry === 'string' ? [] : (existingEntry.params || []);
+    if (existingName && !structuralFunctionRegistry[structuralSignature]) {
+      structuralFunctionRegistry[structuralSignature] = {
+        name: existingName,
+        params: cloneParamDefinitions(existingParams)
+      };
+    }
     groups.forEach(group => {
-      insertProcedureCall(group, name,workspace);
+      insertProcedureCall(group, existingName, workspace, existingParams);
     });
     return;
   }
 
   const functionName = "doSomething" + (Object.keys(customFunctionRegistry).length + 1);
-  customFunctionRegistry[signature] = functionName;
 
   Blockly.Events.disable();
   Blockly.Events.setGroup(true);
 
   try {
-    const def = workspace.newBlock("procedures_defnoreturn");
+    // 1. Extract Parameters
+    // OLD: const literalParams = extractLiteralParameters(group);
+// NEW:
+    const literalParams = extractLiteralParameters(primaryGroup, workspace);
+    const canonicalParams = cloneParamDefinitions(literalParams);
+    customFunctionRegistry[signature] = { name: functionName, params: canonicalParams };
+    structuralFunctionRegistry[structuralSignature] = {
+      name: functionName,
+      params: cloneParamDefinitions(canonicalParams)
+    };
+
+    // 2. Create Variables FIRST (Critical for OpenRoberta)
+    // The block will check if these exist before drawing the rows.
+    literalParams.forEach(p => {
+        let type = p.type.charAt(0).toUpperCase() + p.type.slice(1).toLowerCase();
+        try { workspace.createVariable(p.paramName, type); } catch (e) {}
+    });
+
+    // 3. Create the Original Native Block
+    // We do NOT use XML creation here, we use newBlock to get the standard init()
+    const def = workspace.newBlock("robProcedures_defnoreturn");
     def.initSvg();
     def.render();
+    for (let i = 0; i < literalParams.length; i++) {
+            def.updateShape_(1);
+        }
     
-    const literalParams = extractLiteralParameters(primaryGroup);
 
-    if (literalParams.length > 0) {
-      const mutation = document.createElement("mutation");
-      literalParams.forEach(p => {
-        const arg = document.createElement("arg");
-        arg.setAttribute("name", p.paramName);
-        arg.setAttribute("type", p.type);
-        mutation.appendChild(arg);
-      });
-      def.domToMutation(mutation);
-
-      literalParams.forEach(p => {
-        try { workspace.createVariable(p.paramName, p.type); } catch (e) {}
-      });
-    }
-
-    let nameField = null;
-    def.inputList.forEach(input => {
-      input.fieldRow.forEach(field => {
-        if (field.name === 'NAME' && typeof field.setValue === "function") {
-          nameField = field;
-        }
-      });
-    });
-
+    // 4. Set the Name
+    let nameField = def.getField("NAME");
     if (nameField) {
-      nameField.setValue(functionName);
-      // Trigger the rename handler to register the procedure
-      if (typeof nameField.onFinishEditing_ === 'function') {
-        nameField.onFinishEditing_(functionName);
-      }
-      // Also notify Blockly's procedure system to update caller blocks
-      if (Blockly.Procedures && Blockly.Procedures.mutateCallers) {
-        Blockly.Procedures.mutateCallers(def);
-      }
-      
-      // Add a change listener to update toolbox when name changes
-      const originalSetValue = nameField.setValue.bind(nameField);
-      nameField.setValue = function(newValue) {
-        const oldValue = this.getValue();
-        originalSetValue(newValue);
+        var oldValidator = nameField.validator_;
+        nameField.validator_ = null;
+        nameField.setValue(functionName);
+        nameField.validator_ = oldValidator;
+    }
+
+    // 5. CALL THE INTERNAL FUNCTION (The "Magic")
+    if (literalParams.length > 0) {
+        // Construct the XML element that represents the parameters
+        const mutationElement = document.createElement("mutation");
+        mutationElement.setAttribute("declare", "false"); 
         
-        // If the name actually changed, update the toolbox
-        if (oldValue !== newValue) {
-          setTimeout(() => {
-            updateToolboxForProcedureRename(oldValue, newValue,workspace);
-          }, 100);
-        }
-      };
-    }
-
-    const doInput = def.getInput("STACK").connection;
-
-    let firstClone = null;
-    let prevClone = null;
-
-    for (let block of primaryGroup) {
-      const cloned = cloneRobertaBlock(block, workspace, primaryGroup);
-
-      if (!firstClone) {
-        firstClone = cloned;
-        if (cloned.previousConnection) {
-          doInput.connect(cloned.previousConnection);
-        }
-      } else {
-        if (prevClone.nextConnection && cloned.previousConnection) {
-          prevClone.nextConnection.connect(cloned.previousConnection);
-        }
-      }
-
-      prevClone = cloned;
-    }
-
-    if (literalParams.length > 0 && firstClone) {
-      function findNextParamFor(type, value) {
-        for (let p of literalParams) {
-          if (!p.used && p.type === type && String(p.originalValue) === String(value)) {
-            p.used = true;
-            return p.paramName;
-          }
-        }
-        return null;
-      }
-
-      // Helper function to recursively replace literals in all nested blocks
-      function replaceBlockLiterals(block) {
-        if (!block) return;
-
-        // Special handling for print blocks: replace field values with variable getters
-        if (block.type === 'text_print') {
-          block.inputList.forEach(input => {
-            input.fieldRow.forEach(field => {
-              if (field && typeof field.getValue === 'function' && field.EDITABLE && field.name) {
-                const v = field.getValue();
-                if (v !== undefined && v !== null && v !== '') {
-                  const pname = findNextParamFor('String', v);
-                  if (pname) {
-                    const varGetter = workspace.newBlock('variables_get');
-                    try { varGetter.setFieldValue(pname, 'VAR'); } catch (e) {}
-                    varGetter.initSvg(); varGetter.render();
-                    
-                    const inputName = input.name;
-                    const inputConn = block.getInput(inputName)?.connection;
-                    if (inputConn && varGetter.outputConnection) {
-                      try { inputConn.connect(varGetter.outputConnection); } catch (e) {}
-                    }
-                  }
-                }
-              }
-            });
-          });
-        }
-
-        block.inputList.forEach(input => {
-          const connected = input.connection && input.connection.targetBlock && input.connection.targetBlock();
-          if (connected) {
-            try {
-              if (connected.type === 'math_number') {
-                const v = connected.getFieldValue && connected.getFieldValue('NUM');
-                const pname = findNextParamFor('Number', v);
-                if (pname) {
-                  try { connected.dispose(false, true); } catch (e) {}
-                  const varGetter = workspace.newBlock('variables_get');
-                  try { varGetter.setFieldValue(pname, 'VAR'); } catch (e) {}
-                  varGetter.initSvg(); varGetter.render();
-                  try { if (input.connection && varGetter.outputConnection) input.connection.connect(varGetter.outputConnection); } catch (e) {}
-                }
-              } else if (connected.type === 'text') {
-                const v = connected.getFieldValue && connected.getFieldValue('TEXT');
-                const pname = findNextParamFor('String', v);
-                if (pname) {
-                  try { connected.dispose(false, true); } catch (e) {}
-                  const varGetter = workspace.newBlock('variables_get');
-                  try { varGetter.setFieldValue(pname, 'VAR'); } catch (e) {}
-                  varGetter.initSvg(); varGetter.render();
-                  try { if (input.connection && varGetter.outputConnection) input.connection.connect(varGetter.outputConnection); } catch (e) {}
-                }
-              } else if (connected.type === 'logic_boolean') {
-                const v = connected.getFieldValue && connected.getFieldValue('BOOL');
-                const pname = findNextParamFor('Boolean', v);
-                if (pname) {
-                  try { connected.dispose(false, true); } catch (e) {}
-                  const varGetter = workspace.newBlock('variables_get');
-                  try { varGetter.setFieldValue(pname, 'VAR'); } catch (e) {}
-                  varGetter.initSvg(); varGetter.render();
-                  try { if (input.connection && varGetter.outputConnection) input.connection.connect(varGetter.outputConnection); } catch (e) {}
-                }
-              } else {
-                // Recursively process non-literal child blocks
-                replaceBlockLiterals(connected);
-              }
-            } catch (e) {}
-          }
-
-          const targetBlock = connected || block;
-          if (targetBlock && targetBlock.inputList) {
-            targetBlock.inputList.forEach(chInput => {
-              chInput.fieldRow.forEach(field => {
-                if (field && typeof field.getValue === 'function' && field.EDITABLE) {
-                  const v = field.getValue();
-                  if (v === undefined || v === null) return;
-                  const ttype = (!isNaN(Number(v))) ? 'Number' : 'String';
-                  const pname = findNextParamFor(ttype, v);
-                  if (pname) {
-                    try {
-                      if (input.connection && input.connection.targetBlock()) {
-                        try { input.connection.targetBlock().dispose(false, true); } catch (e) {}
-                        const varGetter = workspace.newBlock('variables_get');
-                        try { varGetter.setFieldValue(pname, 'VAR'); } catch (e) {}
-                        varGetter.initSvg(); varGetter.render();
-                        try { if (input.connection && varGetter.outputConnection) input.connection.connect(varGetter.outputConnection); } catch (e) {}
-                      } else {
-                        const varGetter = workspace.newBlock('variables_get');
-                        try { varGetter.setFieldValue(pname, 'VAR'); } catch (e) {}
-                        varGetter.initSvg(); varGetter.render();
-                        try { if (input.connection && varGetter.outputConnection) input.connection.connect(varGetter.outputConnection); } catch (e) {}
-                      }
-                    } catch (e) {}
-                  }
-                }
-              });
-            });
-          }
+        literalParams.forEach(p => {
+            const arg = document.createElement("arg");
+            arg.setAttribute("name", p.paramName);
+            // OpenRoberta expects capitalized types: "Number", "Boolean"
+            let type = p.type.charAt(0).toUpperCase() + p.type.slice(1).toLowerCase();
+            arg.setAttribute("type", type);
+            mutationElement.appendChild(arg);
         });
 
-        // Also process any blocks in the next chain
-        const nextBlock = block.getNextBlock();
-        if (nextBlock) {
-          replaceBlockLiterals(nextBlock);
-        }
-      }
+        // Call the function defined inside the block!
+        // This forces the block to process the args and draw the rows.
+        def.domToMutation(mutationElement); 
 
-      // Start replacing literals in the cloned sequence
-      if (firstClone) {
-        replaceBlockLiterals(firstClone);
-      }
+        // Ensure the declaration blocks reflect the detected names and types.
+        syncParameterDeclarations(def, literalParams, workspace);
+    }
+    
+    // 6. Fill the Stack
+    const doInput = def.getInput("STACK");
+    if (doInput) {
+        const connection = doInput.connection;
+        let firstClone = null;
+        let prevClone = null;
+
+        for (let block of primaryGroup) {
+            const cloned = cloneRobertaBlock(block, workspace, primaryGroup);
+            if (!firstClone) {
+                firstClone = cloned;
+                if (cloned.previousConnection) connection.connect(cloned.previousConnection);
+            } else {
+                if (prevClone.nextConnection && cloned.previousConnection) {
+                    prevClone.nextConnection.connect(cloned.previousConnection);
+                }
+            }
+            prevClone = cloned;
+        }
+        
+        if (literalParams.length > 0 && firstClone) {
+            replaceBlockLiterals(firstClone, literalParams, workspace);
+        }
     }
 
+    // 7. Replace with Calls
     groups.forEach(group => {
-      insertProcedureCall(group, functionName,workspace);
+      insertProcedureCall(group, functionName, workspace, canonicalParams);
     });
 
-    // visual feedback for debugging: flash first block of the primary group
-    try {
-      if (primaryGroup && primaryGroup[0]) {
-        applyBorderGlow(primaryGroup[0]);
-        setTimeout(() => removeBorderGlow(primaryGroup[0]), 1200);
-      }
-    } catch (e) { console.warn('flash feedback failed', e); }
+    // Position
+    if (primaryGroup[0]) {
+        const xy = primaryGroup[0].getRelativeToSurfaceXY();
+        def.moveBy(xy.x + 50, xy.y + 50);
+    }
 
-    // Update toolbox to show the new function
-    updateToolboxForProcedure(functionName,workspace);
+    updateToolboxForProcedure(functionName, workspace);
 
+  } catch (e) {
+      console.error("Error creating custom block:", e);
   } finally {
     Blockly.Events.setGroup(false);
     Blockly.Events.enable();
   }
 }
 
+// Helper to replace values with variables (Ensure this exists in your file)
+// Helper to replace values with variables (1-to-1 mapping)
+function normalizeParameterType(type) {
+  if (!type || typeof type !== 'string') {
+    return undefined;
+  }
+  return type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
+}
+
+function getOrCreateVariableModel(workspace, param) {
+  if (!workspace || !param || !param.paramName) {
+    return null;
+  }
+
+  const normalizedType = normalizeParameterType(param.type);
+  let model = null;
+
+  if (typeof workspace.getVariable === 'function') {
+    model = workspace.getVariable(param.paramName, normalizedType) ||
+        workspace.getVariable(param.paramName);
+  }
+
+  if (!model && typeof workspace.createVariable === 'function') {
+    try {
+      model = workspace.createVariable(param.paramName, normalizedType);
+    } catch (e) {
+      console.warn('Failed to create parameter variable', param.paramName, e);
+    }
+  }
+
+  return model;
+}
+
+function syncParameterDeclarations(defBlock, literalParams, workspace) {
+  if (!defBlock || !Array.isArray(literalParams) || literalParams.length === 0) {
+    return;
+  }
+
+  const declarationInput = defBlock.getInput('ST');
+  if (!declarationInput || !declarationInput.connection) {
+    console.warn('syncParameterDeclarations: no declaration input on procedure');
+    return;
+  }
+
+  let declaration = declarationInput.connection.targetBlock();
+  let index = 0;
+  const targetWorkspace = workspace || defBlock.workspace;
+
+  while (declaration && index < literalParams.length) {
+    if (declaration.type === 'robLocalVariables_declare') {
+      const param = literalParams[index++];
+      const normalizedType = normalizeParameterType(param.type) || 'Number';
+
+      const nameField = declaration.getField('VAR');
+      if (nameField) {
+        const previousValidator = nameField.validator_;
+        if (typeof nameField.setValidator === 'function') {
+          nameField.setValidator(null);
+        }
+        nameField.setValue(param.paramName);
+        if (typeof nameField.setValidator === 'function') {
+          nameField.setValidator(previousValidator || null);
+        }
+      }
+
+      const typeField = declaration.getField('TYPE');
+      if (typeField) {
+        typeField.setValue(normalizedType);
+      }
+      if (typeof declaration.updateType_ === 'function') {
+        declaration.updateType_(normalizedType);
+      }
+
+      const model = getOrCreateVariableModel(targetWorkspace, param);
+      if (model && typeof model.getId === 'function') {
+        param.variableId = model.getId();
+      } else {
+        param.variableId = param.paramName;
+      }
+    }
+
+    declaration = declaration.getNextBlock ? declaration.getNextBlock() : null;
+  }
+
+  if (index < literalParams.length) {
+    console.warn('syncParameterDeclarations: parameter count exceeds declarations');
+  }
+}
+
+function replaceBlockLiterals(block, literalParams, workspace) {
+  if (!block) return;
+
+  let nextParamIndex = 0;
+
+  const takeNextParam = () => {
+    if (nextParamIndex >= literalParams.length) {
+      return null;
+    }
+    const param = literalParams[nextParamIndex++];
+    param.used = true;
+    return param;
+  };
+
+  const isLiteralBlock = target => {
+    if (!target) return false;
+    return target.type === 'math_number' ||
+           target.type === 'math_integer' ||
+           target.type === 'text' ||
+           target.type === 'logic_boolean';
+  };
+
+  const walk = current => {
+    if (!current) return;
+
+    current.inputList.forEach(input => {
+      const target = input.connection && input.connection.targetBlock();
+      if (!target) {
+        return;
+      }
+
+      if (isLiteralBlock(target)) {
+        const matchedParam = takeNextParam();
+        if (!matchedParam) {
+          return;
+        }
+
+        const varGet = workspace.newBlock('variables_get');
+        let variableModel = null;
+        if (matchedParam.variableId && typeof workspace.getVariableById === 'function') {
+          variableModel = workspace.getVariableById(matchedParam.variableId);
+        }
+        if (!variableModel) {
+          variableModel = getOrCreateVariableModel(workspace, matchedParam);
+        }
+
+        const fieldValue = (variableModel && typeof variableModel.getId === 'function')
+          ? variableModel.getId()
+          : matchedParam.paramName;
+        matchedParam.variableId = (variableModel && typeof variableModel.getId === 'function')
+          ? variableModel.getId()
+          : matchedParam.paramName;
+        varGet.setFieldValue(fieldValue, 'VAR');
+        varGet.initSvg();
+        varGet.render();
+
+        target.dispose();
+        input.connection.connect(varGet.outputConnection);
+      } else {
+        walk(target);
+      }
+    });
+
+    if (current.getNextBlock) {
+      walk(current.getNextBlock());
+    }
+  };
+
+  walk(block);
+}
+
+function cloneParamDefinitions(params) {
+  if (!Array.isArray(params)) return [];
+  return params.map(p => ({
+    paramName: p.paramName,
+    type: p.type,
+    originalValue: p.originalValue,
+    variableId: p.variableId
+  }));
+}
+
+function applyCanonicalParamNames(actualParams, canonicalParams) {
+  if (!Array.isArray(canonicalParams) || canonicalParams.length === 0) {
+    return actualParams;
+  }
+
+  if (!Array.isArray(actualParams) || actualParams.length === 0) {
+    console.warn('applyCanonicalParamNames: missing actual params, falling back to canonical definitions');
+    return cloneParamDefinitions(canonicalParams).map(p => ({ ...p, used: false }));
+  }
+
+  if (actualParams.length !== canonicalParams.length) {
+    console.warn('applyCanonicalParamNames: length mismatch (actual:', actualParams.length, 'canonical:', canonicalParams.length, ')');
+  }
+
+  return actualParams.map((param, idx) => {
+    const canonical = canonicalParams[idx] || canonicalParams[canonicalParams.length - 1] || {};
+    return {
+      ...param,
+      paramName: canonical.paramName || param.paramName,
+      type: canonical.type || param.type
+    };
+  });
+}
 function safeDispose(block) {
   if (!block) return;
   if (!block.workspace) return;
@@ -1374,6 +1227,13 @@ function structureKey(block) {
   return JSON.stringify(serializeBlockTree(block));
 }
 
+function getStructuralSequenceSignature(group) {
+  if (!Array.isArray(group)) {
+    return "";
+  }
+  return group.map(b => structureKey(b)).join("|SEQ|");
+}
+
 function getLinearChainFromStart(startBlock) {
   let chain = [];
   let b = startBlock.getNextBlock();
@@ -1386,9 +1246,9 @@ function getLinearChainFromStart(startBlock) {
   return chain;
 }
 
-function hasAtLeastThreeDifferentTypes(group) {
-  return new Set(group.map(b => b.type)).size >= 3;
-}
+const MIN_DUP_SEQUENCE_LENGTH = 3;
+const MAX_DUP_SEQUENCE_LENGTH = 8;
+const MIN_DISTINCT_BLOCK_TYPES = 3;
 
 function highlightBlockAndChildren(block) {
   applyBorderGlow(block);
@@ -1409,7 +1269,6 @@ function highlightBlockAndChildren(block) {
 
 function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
   console.log("Highlighting function candidates...");
-  toastPromptShown = false;
   workspace.getAllBlocks().forEach(b => {
     removeBorderGlow(b)
   });
@@ -1545,232 +1404,194 @@ function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
   }
   if (chain.length < SEQ_LEN) return;
 
-  let sequences = {};
+  const sequences = {};
+  const minSequenceLength = Math.max(SEQ_LEN || MIN_DUP_SEQUENCE_LENGTH, MIN_DUP_SEQUENCE_LENGTH);
+  const maxSequenceLength = Math.max(minSequenceLength, MAX_DUP_SEQUENCE_LENGTH);
 
-  for (let i = 0; i <= chain.length - SEQ_LEN; i++) {
-    let group = chain.slice(i, i + SEQ_LEN);
+  for (let startIndex = 0; startIndex < chain.length; startIndex++) {
+    const typeCounts = new Map();
 
-    if (!group.every(blockIsStructurallyComplete)) continue;
-    if (!hasAtLeastThreeDifferentTypes(group)) continue;
+    for (let length = 1; length <= maxSequenceLength && startIndex + length <= chain.length; length++) {
+      const candidateBlock = chain[startIndex + length - 1];
 
-    let key = group.map(b => structureKey(b)).join("|SEQ|");
+      if (!blockIsStructurallyComplete(candidateBlock)) {
+        break;
+      }
 
-    if (!sequences[key]) sequences[key] = [];
-    sequences[key].push(group);
+      const blockType = candidateBlock.type || '__unknown__';
+      typeCounts.set(blockType, (typeCounts.get(blockType) || 0) + 1);
+
+      if (length < minSequenceLength) {
+        continue;
+      }
+
+      if (typeCounts.size < MIN_DISTINCT_BLOCK_TYPES) {
+        continue;
+      }
+
+      const group = chain.slice(startIndex, startIndex + length);
+      group.__startIndex = startIndex;
+      const key = group.map(b => structureKey(b)).join("|SEQ|");
+
+      if (!sequences[key]) sequences[key] = [];
+      sequences[key].push(group);
+    }
   }
 
-  let allDuplicateGroups = [];
+  const duplicateMeta = {};
 
-  Object.values(sequences).forEach(groups => {
+  Object.entries(sequences).forEach(([key, groups]) => {
     if (groups.length >= 2) {
-      allDuplicateGroups.push(...groups);
+      const startIds = groups
+        .map(g => (g[0] && g[0].id) || '')
+        .filter(Boolean);
+      const uniqueStartIds = Array.from(new Set(startIds));
+      const startSignature = uniqueStartIds.slice().sort().join('|');
+      const startPositions = groups
+        .map(g => typeof g.__startIndex === 'number' ? g.__startIndex : -1);
+      const lastStartIndex = startPositions.length
+        ? Math.max.apply(Math, startPositions)
+        : -1;
+
+      const meta = {
+        key,
+        groups,
+        length: groups[0] ? groups[0].length : 0,
+        startIds: uniqueStartIds,
+        startSignature,
+        lastStartIndex,
+        overshadowed: false
+      };
+      duplicateMeta[key] = meta;
+    }
+  });
+  const duplicateList = Object.values(duplicateMeta).sort((a, b) => {
+    const lenA = a.length || 0;
+    const lenB = b.length || 0;
+    if (lenB !== lenA) {
+      return lenB - lenA;
+    }
+    const lastA = typeof a.lastStartIndex === 'number' ? a.lastStartIndex : -1;
+    const lastB = typeof b.lastStartIndex === 'number' ? b.lastStartIndex : -1;
+    return lastB - lastA;
+  });
+  const primaryDuplicateKey = duplicateList.length ? duplicateList[0].key : null;
+  const claimedSignatures = new Set();
+  duplicateList.forEach(meta => {
+    if (!meta.startSignature) {
+      meta.overshadowed = false;
+      return;
+    }
+    if (claimedSignatures.has(meta.startSignature)) {
+      meta.overshadowed = true;
+    } else {
+      claimedSignatures.add(meta.startSignature);
+      meta.overshadowed = false;
     }
   });
 
-  if (allDuplicateGroups.length > 0) {
-    console.log('highlightOnlyFunctionCandidates: found duplicate groups =', allDuplicateGroups.length);
-    allDuplicateGroups.forEach(group => {
-      group.forEach(b => highlightBlockAndChildren(b));
-    });
+  Object.keys(sequences).forEach(key => {
+    const groups = sequences[key];
+    const registryEntry = structuralFunctionRegistry[key];
+    const duplicateInfo = duplicateMeta[key];
 
-    if (!toastPromptShown) {
-      toastPromptShown = true;
-      console.log('highlightOnlyFunctionCandidates: scheduling toast prompt in 5s');
+    if (registryEntry && groups.length >= 1) {
+      const sequenceKey = key + '::reuse';
+      if (promptedSignatures.has(sequenceKey) || rejectedSignatures.has(sequenceKey)) {
+        return;
+      }
+
+      const entryObj = typeof registryEntry === 'string'
+        ? { name: registryEntry, params: [] }
+        : registryEntry;
+      if (!entryObj || !entryObj.name) {
+        return;
+      }
+
+      console.log(`Sequence matches existing function ${entryObj.name}, prompting reuse.`);
+      groups.forEach(group => {
+        group.forEach(b => highlightBlockAndChildren(b));
+      });
+
+      promptedSignatures.add(sequenceKey);
+
       setTimeout(() => {
-        console.log('highlightOnlyFunctionCandidates: invoking showToastPrompt');
         showToastPrompt(
-            "Identical block sequence detected. Replace with a custom block?",
-            function() {
-              try {
-                console.log('toast OK clicked: calling createCustomBlockFromSequence');
-                createCustomBlockFromSequence(allDuplicateGroups,workspace);
-              } catch (err) {
-                console.error('createCustomBlockFromSequence failed', err);
-              }
-            },
-            function() {
-              try { console.log('toast Cancel clicked: user declined replacement.'); } catch (e) {}
+          `You've already created "${entryObj.name}" from this sequence. Replace it with that function call?`,
+          function() {
+            try {
+              const canonicalParams = cloneParamDefinitions(entryObj.params || []);
+              groups.forEach(group => {
+                insertProcedureCall(group, entryObj.name, workspace, canonicalParams);
+              });
+              rejectedSignatures.delete(sequenceKey);
+            } catch (err) {
+              console.error('insertProcedureCall for existing function failed', err);
             }
+            promptedSignatures.delete(sequenceKey);
+          },
+          function() {
+            groups.forEach(group => {
+              group.forEach(b => removeBorderGlow(b));
+            });
+            rejectedSignatures.add(sequenceKey);
+            console.log('toast Cancel clicked: user declined existing function reuse.');
+            promptedSignatures.delete(sequenceKey);
+          }
         );
       }, 5000);
+      return;
     }
-    
-  }
-}
 
-//newmethod
-//add eventlistener for newRunBrick
-function initRunBrick(workspace){
-  let RunBrick = document.getElementById('newRunBrick');
-  if (RunBrick) {
-    console.log('adding eventlistener');
-    // must use anonymous function to pass parameters to newRunBrick()
-    RunBrick.addEventListener("click", function(){ newRunBrick(workspace); });
-  }
-}
-
-// highlightOnlyFunctionCandidates is called in main.js
-// call my functions same way
-async function newRunBrick(workspace){
-    const apiUrl = 'http://127.0.0.1:5000'; // Flask app URL
-
-      console.info("launching viewer!");
-      //wait for viewer to be ready
-      await getCall(apiUrl + '/viewer').then(_ => console.log('Have awaited launcing viewer'));
-
-      let xmlProgram = Blockly.Xml.workspaceToDom(workspace);
-      let xmlTextProgram = Blockly.Xml.domToText(xmlProgram); //delete later
-      //console.info("xmlProgram: ", xmlProgram);
-      console.info("xmlTextProgram: ", xmlTextProgram);
-
-      //get all block-elements
-      let blockElems = xmlProgram.getElementsByTagName("block");
-      //put blocks in queue, and add procedure calls to map
-      let queuedBlocks = queueBlocks(blockElems);
-      // Run through the queued blocks via API
-      await blockAPICalls(apiUrl, queuedBlocks);
-}
-
-  //map for procedure calls
-  let procedureMap = new Map();
-  //map for defined arguments
-  let argsMap = new Map();
-
-  function queueBlocks(blockElems){
-    //gets blocks, puts in queue (array) and/or map depending on procedure or not
-      let blockStack = [];
-      procedureMap = new Map(); //reset global map
-
-      for (let index = 0; index < blockElems.length; index++) {
-          const element = blockElems[index];
-          let type = element.getAttribute('type');
-          if(type=='procedures_defnoreturn' || type=='robProcedures_defnoreturn'){ //defining custom block
-              let procedureName = element.childNodes[1].childNodes[0].nodeValue;
-              //stupid nested if-else, bc element.childNodes[3] only works for our block, bc extra child 'Comment'
-              if(type=='procedures_defnoreturn'){ //add stack element's children as procedure
-                procedureMap.set(procedureName, element.childNodes[3].childNodes);
-              } else {
-                procedureMap.set(procedureName, element.childNodes[2].childNodes);
-              }
-              //move past the blocks nested in procedure - so we dont accidentally add the procedure to the queue again
-              let nestedBlocks = element.getElementsByTagName("block");
-              index += nestedBlocks.length;
-          } else { //all other block types
-              // add as 'next' in queue
-              blockStack.push(element);
-          }
+    if (groups.length >= 2) {
+      if (primaryDuplicateKey && key !== primaryDuplicateKey) {
+        return;
       }
-      return blockStack;
-  }
+      if (duplicateInfo && duplicateInfo.overshadowed) {
+        return;
+      }
+      const sequenceKey = key + '::duplicate';
+      if (promptedSignatures.has(sequenceKey) || rejectedSignatures.has(sequenceKey)) {
+        return;
+      }
+      const duplicateGroups = duplicateInfo ? duplicateInfo.groups : groups;
+      console.log(`Found new duplicate sequence with key: ${key}`);
+      duplicateGroups.forEach(group => {
+        group.forEach(b => highlightBlockAndChildren(b));
+      });
 
-  async function blockAPICalls(apiUrl, blockElements){
-    for (let index = 0; index < blockElements.length; index++) {
-      const element = blockElements[index];
-      console.info(element.getAttribute('type'));
+      promptedSignatures.add(sequenceKey);
 
-      let url = '';
-      let obj;
-      //rn everything is just GET. Maybe POST is more correct but if it works why bother
-      switch(element.getAttribute('type')){
-        case 'naoActions_moveToPosition':
-          //The values we want to get are nested like:
-          // value, block, field, text.nodeValue (each being a xml element)
-          //The x value in <field> x_value </field>, is treated as a childNode 
-          let val = element.childNodes[0].childNodes[0].childNodes[0].childNodes[0].nodeValue;
-          //if found value is a parameter, get the value in map. Otherwise it's a number, and we use that
-          let x = argsMap.has(val) ? argsMap.get(val) : val;
-          val = element.childNodes[1].childNodes[0].childNodes[0].childNodes[0].nodeValue;
-          let y = argsMap.has(val) ? argsMap.get(val) : val;
-          val = element.childNodes[2].childNodes[0].childNodes[0].childNodes[0].nodeValue;
-          let z = argsMap.has(val) ? argsMap.get(val) : val;
-          console.info("coordinates x, y and z: ", x, " ",  y, " ", z);
-          url = apiUrl + '/move_pos/' + x + "/" + y + "/" + z;
-
-          await getCall(url);
-          continue;
-        case 'naoActions_moveToObject':
-            obj = element.childNodes[0].childNodes[0].nodeValue;
-            url = apiUrl + '/move_obj/' + obj;
-            await getCall(url);
-            continue;
-        case 'naoActions_pickObject':
-            //pickObject has field <field name="OBJECT">RED_OBJECT</field>
-            //to get the actual value of the field, we must access the child's child
-            obj = element.childNodes[0].childNodes[0].nodeValue;
-            url = apiUrl + '/pick_obj/' + obj;
-            await getCall(url);
-            continue;
-        case 'naoActions_grasp':
-            url = apiUrl + '/grasp';
-            await getCall(url);
-            continue;
-        case 'naoActions_release':
-            url = apiUrl + '/release';
-            await getCall(url);
-            continue;
-        case 'robControls_wait_time': //using OpenRoberta's pre-defined wait block - see WaitTimeStmt.java
-            let seconds = element.childNodes[0].childNodes[0].childNodes[0].childNodes[0].nodeValue;
-            url = apiUrl + '/wait/' + seconds;
-            await getCall(url);
-            continue;
-        case 'robProcedures_callnoreturn': //still need to handle OG define function feature
-            let procedureName = element.childNodes[0].getAttribute('name');
-            console.info("procedure found: ", procedureName);
-            // Call the corresponding procedure in procedureMap
-            if (procedureMap.has(procedureName)){
-              //call function recursively, to make api calls for all blocks in procedure
-              await blockAPICalls(apiUrl, procedureMap.get(procedureName));
+      setTimeout(() => {
+        showToastPrompt(
+          "Identical block sequence detected. Replace with a custom block?",
+          function() {
+            try {
+              createCustomBlockFromSequence(duplicateGroups, workspace);
+              rejectedSignatures.delete(sequenceKey);
+            } catch (err) {
+              console.error('createCustomBlockFromSequence failed', err);
             }
-            continue;
-        case 'customProcedures_callnoreturn': //NOTICE - it's _CALLnoreturn, not _DEFnoreturn 
-            procedureName = element.childNodes[0].getAttribute('name');
-            console.info("procedure found: ", procedureName);
-            // Call the corresponding procedure in procedureMap
-            if (procedureMap.has(procedureName)){
-              //if called with parameters, save those in map
-              let args = element.childNodes[0].childNodes;
-              for (let index = 0; index < args.length; index++) {
-                const arg = args[index];
-                //get the actual value
-                //value( child block (child field (child text)))
-                let value = element.childNodes[2+index].childNodes[0].childNodes[0].childNodes[0].nodeValue;
-
-                argsMap.set(arg.getAttribute('name'), value);
-                //console.info("got args name: ", arg.getAttribute('name'));
-               // console.info("got value: ", value);
-              }
-              await blockAPICalls(apiUrl, procedureMap.get(procedureName));
-            }
-            continue;
-      }  
+          },
+          function() {
+            // User said no. We can remove highlighting if we want.
+            duplicateGroups.forEach(group => {
+                group.forEach(b => removeBorderGlow(b));
+            });
+            duplicateGroups.length = 0;
+            clearObjectStore(sequences);
+            clearObjectStore(duplicateMeta);
+            promptedSignatures.add(sequenceKey);
+            //rejectedSignatures.clear();
+            rejectedSignatures.add(sequenceKey);
+            console.log('toast Cancel clicked: user declined replacement.');
+          }
+        );
+      }, 5000);
+      return;
     }
-    return true;
-  }
-
-  async function getCall(url){
-    try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (data.error) {
-      return `Error from Python: ${data.error}`;
-    }
-
-    return data.result;
-    } catch (error) {
-        return `An error occurred: ${error}`;
-    }
-  }
+  });
+}
 
   // Exported API for CommonJS/AMD/browser global
   return {
@@ -1795,8 +1616,7 @@ async function newRunBrick(workspace){
     updateToolboxForProcedureRename: typeof updateToolboxForProcedureRename !== 'undefined' ? updateToolboxForProcedureRename : null,
     applyBorderGlow: typeof applyBorderGlow !== 'undefined' ? applyBorderGlow : null,
     removeBorderGlow: typeof removeBorderGlow !== 'undefined' ? removeBorderGlow : null,
-    highlightOnlyFunctionCandidates: typeof highlightOnlyFunctionCandidates !== 'undefined' ? highlightOnlyFunctionCandidates : null,
-    initRunBrick: typeof initRunBrick !== 'undefined' ? initRunBrick : null
+    highlightOnlyFunctionCandidates: typeof highlightOnlyFunctionCandidates !== 'undefined' ? highlightOnlyFunctionCandidates : null
   };
 
 });
