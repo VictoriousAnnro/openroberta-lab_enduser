@@ -1593,6 +1593,188 @@ function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
   });
 }
 
+//newmethod
+
+
+//add eventlistener for newRunBrick
+function initRunBrick(workspace){
+  let RunBrick = document.getElementById('newRunBrick');
+  if (RunBrick) {
+    console.log('adding eventlistener');
+    // must use anonymous function to pass parameters to newRunBrick()
+    RunBrick.addEventListener("click", function(){ newRunBrick(workspace); });
+  }
+}
+
+// highlightOnlyFunctionCandidates is called in main.js
+// call my functions same way
+async function newRunBrick(workspace){
+  const apiUrl = 'http://127.0.0.1:5000'; // Flask app URL
+  console.info("launching viewer!");
+
+  //wait for viewer to be ready
+  await getCall(apiUrl + '/viewer').then(_ => console.log('Have awaited launcing viewer'));
+
+  let xmlProgram = Blockly.Xml.workspaceToDom(workspace);
+  let xmlTextProgram = Blockly.Xml.domToText(xmlProgram); //delete later
+  //console.info("xmlProgram: ", xmlProgram);
+  console.info("xmlTextProgram: ", xmlTextProgram);
+
+  //get all block-elements
+  let blockElems = xmlProgram.getElementsByTagName("block");
+
+  //put blocks in queue, and add procedure calls to map
+  let queuedBlocks = queueBlocks(blockElems);
+
+  // Run through the queued blocks via API
+  await blockAPICalls(apiUrl, queuedBlocks);
+}
+
+
+  //map for procedure calls
+  let procedureMap = new Map();
+  //map for defined arguments
+  let argsMap = new Map();
+
+  function queueBlocks(blockElems){
+    //gets blocks, puts in queue (array) and/or map depending on procedure or not
+    let blockStack = [];
+    procedureMap = new Map(); //reset global map
+    for (let index = 0; index < blockElems.length; index++) {
+      const element = blockElems[index];
+      let type = element.getAttribute('type');
+
+      if(type=='procedures_defnoreturn' || type=='robProcedures_defnoreturn'){ //defining custom block
+          let procedureName = element.childNodes[1].childNodes[0].nodeValue;
+          //stupid nested if-else, bc element.childNodes[3] only works for our block, bc extra child 'Comment'
+          if(type=='procedures_defnoreturn'){ //add stack element's children as procedure
+            procedureMap.set(procedureName, element.childNodes[3].childNodes);
+          } else {
+            procedureMap.set(procedureName, element.childNodes[2].childNodes);
+          }
+
+          //move past the blocks nested in procedure - so we dont accidentally add the procedure to the queue again
+          let nestedBlocks = element.getElementsByTagName("block");
+          index += nestedBlocks.length;
+      } else { //all other block types
+          // add as 'next' in queue
+          blockStack.push(element);
+      }
+    }
+    return blockStack;
+  }
+
+
+  async function blockAPICalls(apiUrl, blockElements){
+    for (let index = 0; index < blockElements.length; index++) {
+      const element = blockElements[index];
+      console.info(element.getAttribute('type'));
+
+      let url = '';
+      let obj;
+      //rn everything is just GET. Maybe POST is more correct but if it works why bother
+      switch(element.getAttribute('type')){
+        case 'naoActions_moveToPosition':
+          //The values we want to get are nested like:
+          // value, block, field, text.nodeValue (each being a xml element)
+          //The x value in <field> x_value </field>, is treated as a childNode 
+          let val = element.childNodes[0].childNodes[0].childNodes[0].childNodes[0].nodeValue;
+
+          //if found value is a parameter, get the value in map. Otherwise it's a number, and we use that
+          let x = argsMap.has(val) ? argsMap.get(val) : val;
+          val = element.childNodes[1].childNodes[0].childNodes[0].childNodes[0].nodeValue;
+          let y = argsMap.has(val) ? argsMap.get(val) : val;
+          val = element.childNodes[2].childNodes[0].childNodes[0].childNodes[0].nodeValue;
+          let z = argsMap.has(val) ? argsMap.get(val) : val;
+          console.info("coordinates x, y and z: ", x, " ",  y, " ", z);
+          url = apiUrl + '/move_pos/' + x + "/" + y + "/" + z;
+
+          await getCall(url);
+          continue;
+        case 'naoActions_moveToObject':
+            obj = element.childNodes[0].childNodes[0].nodeValue;
+            url = apiUrl + '/move_obj/' + obj;
+            await getCall(url);
+            continue;
+        case 'naoActions_pickObject':
+            //pickObject has field <field name="OBJECT">RED_OBJECT</field>
+            //to get the actual value of the field, we must access the child's child
+            obj = element.childNodes[0].childNodes[0].nodeValue;
+            url = apiUrl + '/pick_obj/' + obj;
+            await getCall(url);
+            continue;
+        case 'naoActions_grasp':
+            url = apiUrl + '/grasp'
+            await getCall(url);
+            continue;
+        case 'naoActions_release':
+            url = apiUrl + '/release';
+            await getCall(url);
+            continue;
+        case 'robControls_wait_time': //using OpenRoberta's pre-defined wait block - see WaitTimeStmt.java
+            let seconds = element.childNodes[0].childNodes[0].childNodes[0].childNodes[0].nodeValue;
+            url = apiUrl + '/wait/' + seconds;
+            await getCall(url);
+            continue;
+        case 'robProcedures_callnoreturn': //still need to handle OG define function feature
+            let procedureName = element.childNodes[0].getAttribute('name');
+            console.info("procedure found: ", procedureName);
+            // Call the corresponding procedure in procedureMap
+            if (procedureMap.has(procedureName)){
+              //call function recursively, to make api calls for all blocks in procedure
+              await blockAPICalls(apiUrl, procedureMap.get(procedureName));
+            }
+            continue;
+        case 'customProcedures_callnoreturn': //NOTICE - it's _CALLnoreturn, not _DEFnoreturn 
+            procedureName = element.childNodes[0].getAttribute('name');
+            console.info("procedure found: ", procedureName);
+            // Call the corresponding procedure in procedureMap
+            if (procedureMap.has(procedureName)){
+              //if called with parameters, save those in map
+              let args = element.childNodes[0].childNodes;
+
+              for (let index = 0; index < args.length; index++) {
+                const arg = args[index];
+                //get the actual value
+                //value( child block (child field (child text)))
+                let value = element.childNodes[2+index].childNodes[0].childNodes[0].childNodes[0].nodeValue;
+                argsMap.set(arg.getAttribute('name'), value);
+                //console.info("got args name: ", arg.getAttribute('name'));
+               // console.info("got value: ", value);
+
+              }
+              await blockAPICalls(apiUrl, procedureMap.get(procedureName));
+            }
+          continue;
+      }  
+    }
+    return true;
+  }
+
+  async function getCall(url){
+    try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.error) {
+      return `Error from Python: ${data.error}`;
+    }
+
+    return data.result;
+    } catch (error) {
+        return `An error occurred: ${error}`;
+    }
+  }
+
   // Exported API for CommonJS/AMD/browser global
   return {
     customFunctionRegistry: typeof customFunctionRegistry !== 'undefined' ? customFunctionRegistry : {},
@@ -1616,7 +1798,8 @@ function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
     updateToolboxForProcedureRename: typeof updateToolboxForProcedureRename !== 'undefined' ? updateToolboxForProcedureRename : null,
     applyBorderGlow: typeof applyBorderGlow !== 'undefined' ? applyBorderGlow : null,
     removeBorderGlow: typeof removeBorderGlow !== 'undefined' ? removeBorderGlow : null,
-    highlightOnlyFunctionCandidates: typeof highlightOnlyFunctionCandidates !== 'undefined' ? highlightOnlyFunctionCandidates : null
+    highlightOnlyFunctionCandidates: typeof highlightOnlyFunctionCandidates !== 'undefined' ? highlightOnlyFunctionCandidates : null,
+    initRunBrick: typeof initRunBrick !== 'undefined' ? initRunBrick : null
   };
 
 });
