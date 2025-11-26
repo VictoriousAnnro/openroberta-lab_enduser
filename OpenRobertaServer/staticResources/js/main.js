@@ -354,6 +354,7 @@ require.config({
                         }, 250);
                       } catch (e) {}
                     });
+                    /*
                       // Trigger an initial check shortly after attachment
                       try {
                         if (repTimer) clearTimeout(repTimer);
@@ -361,6 +362,7 @@ require.config({
                           try { func.highlightOnlyFunctionCandidates(ws, startBlock); } catch (e) {}
                         }, 50);
                       } catch (e) {}
+                       */
                   }
                 }
               } catch (inner) {
