@@ -64,8 +64,7 @@ def runDelayedSimLoop(result):
 # move_to_position(x, y, z, duration) -> Move end-effector to XYZ coordinates
 @app.route("/move_pos/<int:x>/<int:y>/<int:z>", methods = ['GET'])
 def move_to_pos(x, y, z):
-    # CURRENTLY CANT HANDLE NEGATIVE VALUES. DO WE NEED NEGATIVES??**
-    result = robot.move_to_position((x/100),(y/100),(z/100)) #convert cm to m
+    result = robot.move_to_position((x/10),(y/10),(z/10)) #convert cm to m
     print(result["status"])
     print(result["message"])
 
