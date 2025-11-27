@@ -37,22 +37,175 @@ def init() -> tuple[mj.MjModel, mj.MjData]:
     
     # Add red box (pickable object)
     # Position: [0.3m, 0.3m, 0.52m] :placed on the table
-    box_body = spec.worldbody.add_body(name="red_box", pos=[0.3, 0.3, 0.52])
-    box_body.add_geom(name="red_box", type=mj.mjtGeom.mjGEOM_BOX, 
-                     size=[0.025, 0.025, 0.025], rgba=[1,0,0,1])
-    box_body.add_freejoint()  # Makes object movable (6 DOF)
 
-    # Add blue box (alternative target)
-    box_body = spec.worldbody.add_body(name="blue_box", pos=[0.5, 0.3, 0.55])
-    box_body.add_geom(name="blue_box", type=mj.mjtGeom.mjGEOM_BOX, 
-                     size=[0.025, 0.025, 0.025], rgba=[0,0,1,1])
-    box_body.add_freejoint()
+    # ---  MATERIALS (For better visuals) ---
+    # Transparent glass
+    spec.add_material(name="glass_mat", rgba=[0.8, 0.9, 1.0, 0.3], shininess=0.9, reflectance=0.5)
+    # Plastic bag
+    spec.add_material(name="bag_mat", rgba=[0.9, 0.9, 0.8, 0.6], shininess=0.2)
+    # Metal
+    spec.add_material(name="metal_mat", rgba=[0.6, 0.6, 0.6, 1.0], shininess=0.8)
 
-    # Add drop bucket (target location for placing objects)
-    box_body = spec.worldbody.add_body(name="drop_bucket", pos=[-0.5, 0.3, 0.51])
-    box_body.add_geom(name="drop_bucket", type=mj.mjtGeom.mjGEOM_BOX, 
-                     size=[0.1, 0.1, 0.005], rgba=[0.5,0.5,0.5,1])
 
+# --- A. NITROGEN BOTTLE (Red) ---
+    # Position: Left
+    body = spec.worldbody.add_body(name="nitrogen_tool", pos=[0.3, 0.3, 0.55])
+    
+    # 1. THE PHYSICAL TRICK: A transparent/invisible box that the robot grabs
+    body.add_geom(name="n_col", type=mj.mjtGeom.mjGEOM_BOX, 
+                  size=[0.018, 0.018, 0.03], 
+                  rgba=[1, 0, 0, 0],       
+                  mass=0.05, friction=[2.0, 0.005, 0.0001]) 
+    
+
+    # 2. THE VISUAL: The nice bottle (No mass, just decoration)
+    # Outer glass
+    body.add_geom(name="n_glass", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  size=[0.015, 0.025, 0], material="glass_mat", 
+                  contype=0, conaffinity=0) 
+    # Red liquid inside
+    body.add_geom(name="n_liq", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  size=[0.012, 0.02, 0], rgba=[0.8, 0, 0, 1], 
+                  contype=0, conaffinity=0)
+    # Black cap
+    body.add_geom(name="n_cap", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0,0,0.025], size=[0.016, 0.005, 0], rgba=[0.1, 0.1, 0.1, 1],
+                  contype=0, conaffinity=0)
+    
+    body.add_freejoint()
+
+# --- B. CHLOROFORM SYRINGE (Blue) ---
+    # Position: Center
+    body = spec.worldbody.add_body(name="chloroform_syringe", pos=[0.3, 0.2, 0.55])
+    
+    # 1. PHYSICS: Grasp box
+    body.add_geom(name="c_col", type=mj.mjtGeom.mjGEOM_BOX, 
+                  size=[0.015, 0.015, 0.04], 
+                  rgba=[0, 0, 1, 0], 
+                  mass=0.02, friction=[2.0, 0.005, 0.0001])
+    
+
+    # 2. VISUAL: Syringe
+    # Main body
+    body.add_geom(name="c_vis_body", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  size=[0.008, 0.035, 0], rgba=[0.8, 0.8, 1, 0.5], contype=0, conaffinity=0)
+    # Blue liquid
+    body.add_geom(name="c_vis_liq", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0,0,-0.01], size=[0.006, 0.02, 0], rgba=[0, 0, 1, 1], contype=0, conaffinity=0)
+    # Plunger (top)
+    body.add_geom(name="c_vis_plunge", type=mj.mjtGeom.mjGEOM_BOX, 
+                  pos=[0,0,0.045], size=[0.012, 0.002, 0.002], rgba=[1, 1, 1, 1], contype=0, conaffinity=0)
+    # Needle (top)
+    body.add_geom(name="c_vis_needle", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0,0,-0.045], size=[0.001, 0.01, 0], rgba=[0.5, 0.5, 0.5, 1], contype=0, conaffinity=0)
+                  
+    body.add_freejoint()
+
+# --- C. SMALL TOLUENE VIAL (Dark Red) ---
+    # Position: Right
+    body = spec.worldbody.add_body(name="toluene_syringe", pos=[0.3, 0.1, 0.55])
+    
+    # 1. PHYSICS
+    body.add_geom(name="t_col", type=mj.mjtGeom.mjGEOM_BOX, 
+                  size=[0.015, 0.015, 0.025], 
+                  rgba=[0.5, 0, 0, 0], 
+                  mass=0.02, friction=[2.0, 0.005, 0.0001])
+    
+    # 2. VISUAL (Small vial like Eppendorf or sample)
+    body.add_geom(name="t_vis", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  size=[0.012, 0.02, 0], material="glass_mat", contype=0, conaffinity=0)
+    body.add_geom(name="t_liq", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  size=[0.01, 0.015, 0], rgba=[0.5, 0, 0, 1], contype=0, conaffinity=0)
+    body.add_geom(name="t_cap", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0,0,0.02], size=[0.013, 0.005, 0], rgba=[1, 1, 1, 1], contype=0, conaffinity=0)
+                  
+    body.add_freejoint()    
+
+
+
+    # ---------------------------------------------------------
+    # 2. FIXED OBJECTS (Scenery)
+    # ---------------------------------------------------------
+
+# --- D. TEDLAR BAG (Target) ---
+    # Position: Left of Table
+    body = spec.worldbody.add_body(name="tedlar_bag_zone", pos=[-0.4, 0.3, 0.505]) # Muy cerca de la mesa
+    
+    # Bag body (Flattened)
+    body.add_geom(name="bag_body", type=mj.mjtGeom.mjGEOM_BOX, 
+                  size=[0.12, 0.10, 0.01], material="bag_mat")
+    # Bag nozzle (Black cylinder)
+    body.add_geom(name="bag_nozzle", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0.1, 0, 0.01], size=[0.01, 0.03, 0], 
+                  rgba=[0.1, 0.1, 0.1, 1], euler=[0, 1.57, 0]) # Rotated horizontal
+    # Visual label
+    body.add_geom(name="bag_label", type=mj.mjtGeom.mjGEOM_BOX, 
+                  pos=[0, 0, 0.011], size=[0.04, 0.03, 0.001], rgba=[1, 1, 1, 1])
+    
+
+
+# --- E. AIR VALVE (Fixed) ---
+    # Position: Front of Table
+    pos_valvula = [-0.3, -0.2, 0.55] 
+    body = spec.worldbody.add_body(name="air_valve", pos=pos_valvula)
+    
+    # Base Pipe (Gray)
+    body.add_geom(name="valve_pipe", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  size=[0.015, 0.04, 0], material="metal_mat")
+    # Rotating Handle (Green box - to indicate it's a valve)
+    body.add_geom(name="valve_handle", type=mj.mjtGeom.mjGEOM_BOX, 
+                  pos=[0, 0, 0.05], size=[0.04, 0.01, 0.005], rgba=[0, 0.8, 0, 1])
+    # Central Bolt
+    body.add_geom(name="valve_bolt", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0, 0, 0.055], size=[0.008, 0.005, 0], rgba=[0.2, 0.2, 0.2, 1])
+    
+
+# --- F. LAPTOP  ---
+    # Position: Rear right corner of the table
+    pos_laptop = [0.5, -0.3, 0.51]
+    body = spec.worldbody.add_body(name="lab_laptop", pos=pos_laptop, euler=[0, 0, 0.5]) # Rotated a bit
+    
+    # Base of the keyboard (Dark gray)
+    body.add_geom(name="lap_base", type=mj.mjtGeom.mjGEOM_BOX, 
+                  size=[0.12, 0.09, 0.005], rgba=[0.2, 0.2, 0.2, 1])
+    # Screen (Opened approximately 90 degrees)
+    body.add_geom(name="lap_screen", type=mj.mjtGeom.mjGEOM_BOX, 
+                  pos=[0, 0.09, 0.08], size=[0.12, 0.005, 0.08], 
+                  rgba=[0.1, 0.1, 0.1, 1], euler=[-0.3, 0, 0]) # Tilted backward
+    # Screen "light" (Soft blue)
+    body.add_geom(name="lap_display", type=mj.mjtGeom.mjGEOM_BOX, 
+                  pos=[0, 0.086, 0.08], size=[0.11, 0.001, 0.07], 
+                  rgba=[0.2, 0.4, 0.8, 0.8], euler=[-0.3, 0, 0], 
+                  material="glass_mat") # Using your glass material to make it shine
+    
+
+# --- G. RACK WITH TUBE (Decoration) ---
+    
+    pos_rack = [0.70, -0.15, 0.52]
+    body = spec.worldbody.add_body(name="test_tube_rack", pos=pos_rack)
+    
+    # Base of the rack (Wood/Orange)
+    body.add_geom(name="rack_base", type=mj.mjtGeom.mjGEOM_BOX, 
+                  size=[0.03, 0.10, 0.02], rgba=[0.6, 0.4, 0.2, 1])
+    
+    # Decorative test tubes (Fixed)
+    # Tube 1
+    body.add_geom(name="tube_1", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0, -0.06, 0.04], size=[0.008, 0.05, 0], material="glass_mat")
+    body.add_geom(name="liq_1", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0, -0.06, 0.02], size=[0.006, 0.03, 0], rgba=[1, 1, 0, 1]) # Yellow
+    # Tube 2
+    body.add_geom(name="tube_2", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0, 0.0, 0.04], size=[0.008, 0.05, 0], material="glass_mat")
+    body.add_geom(name="liq_2", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0, 0.0, 0.03], size=[0.006, 0.04, 0], rgba=[0, 1, 1, 1]) # Cyan
+    # Tube 3
+    body.add_geom(name="tube_3", type=mj.mjtGeom.mjGEOM_CYLINDER, 
+                  pos=[0, 0.06, 0.04], size=[0.008, 0.05, 0], material="glass_mat")
+
+
+
+# --- H. TABLE SURFACE ---
     # Add table surface (static object)
     box_body = spec.worldbody.add_body(name="table_top", pos=[0.0, 0.0, 0.5])
     box_body.add_geom(name="table_top", type=mj.mjtGeom.mjGEOM_BOX, 
@@ -342,8 +495,8 @@ def main():
     open_gripper()  # Start with gripper open
     
     # Get object positions from simulation
-    obj_pos = get_body_pos("blue_box")  # Object to pick <---- Feel free to change
-    drop_pos = get_body_pos("drop_bucket")  # Where to place object
+    obj_pos = get_body_pos("chloroform_syringe")  # Object to pick <---- Feel free to change
+    drop_pos = get_body_pos("tedlar_bag_zone")  # Where to place object
     
     # ------------------------- TRAJECTORY PLANNING -------------------------
     #Plan all trajectories before execution
