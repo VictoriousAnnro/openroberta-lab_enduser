@@ -25,7 +25,7 @@
   var structuralFunctionRegistry = {};
   var promptedSignatures = new Set();
   var rejectedSignatures = new Set();
-  var dismissedSequenceAnchors = new Set();
+
   const usedNames = new Set();
   let globalParamCounter = 0;
   const SVG_NS = "http://www.w3.org/2000/svg";
@@ -106,7 +106,7 @@
             } else {
               clone.setFieldValue(field.getValue(), field.name);
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       });
     });
@@ -259,19 +259,19 @@
             valBlock = workspace.newBlock("math_number");
             try {
               valBlock.setFieldValue(String(p.originalValue), "NUM");
-            } catch (e) {}
+            } catch (e) { }
           } else if (p.type === "String") {
             valBlock = workspace.newBlock("text");
             try {
               valBlock.setFieldValue(String(p.originalValue), "TEXT");
-            } catch (e) {}
+            } catch (e) { }
           } else if (p.type === "Boolean") {
             valBlock = workspace.newBlock("logic_boolean");
             try {
               let boolVal = String(p.originalValue).toUpperCase();
               if (boolVal !== "TRUE" && boolVal !== "FALSE") boolVal = "TRUE";
               valBlock.setFieldValue(boolVal, "BOOL");
-            } catch (e) {}
+            } catch (e) { }
           }
 
           // Connect the value block
@@ -327,12 +327,12 @@
     if (block.previousConnection && block.previousConnection.targetConnection) {
       try {
         block.previousConnection.disconnect();
-      } catch (e) {}
+      } catch (e) { }
     }
     if (block.nextConnection && block.nextConnection.targetConnection) {
       try {
         block.nextConnection.disconnect();
-      } catch (e) {}
+      } catch (e) { }
     }
 
     block.inputList.forEach((input) => {
@@ -366,7 +366,7 @@
     Object.keys(fields).forEach((name) => {
       try {
         block.setFieldValue(fields[name], name);
-      } catch (e) {}
+      } catch (e) { }
     });
 
     // Create + connect children blocks
@@ -593,7 +593,7 @@
           p.type.charAt(0).toUpperCase() + p.type.slice(1).toLowerCase();
         try {
           workspace.createVariable(p.paramName, type);
-        } catch (e) {}
+        } catch (e) { }
       });
 
       // 3. Create the Original Native Block
@@ -664,7 +664,7 @@
         }
       }
 
-      
+
 
       // 7. Replace with Calls
       groups.forEach((group) => {
@@ -973,7 +973,7 @@
         try {
           console.log("showToastPrompt: OK clicked");
           toast.remove();
-        } catch (e) {}
+        } catch (e) { }
         try {
           onConfirm();
         } catch (err) {
@@ -987,7 +987,7 @@
         try {
           console.log("showToastPrompt: Cancel clicked");
           toast.remove();
-        } catch (e) {}
+        } catch (e) { }
         try {
           onCancel();
         } catch (err) {
@@ -1007,7 +1007,7 @@
         if (field.name && typeof field.getValue === "function") {
           try {
             clone.setFieldValue(field.getValue(), field.name);
-          } catch (e) {}
+          } catch (e) { }
         }
       });
     });
@@ -1109,20 +1109,19 @@
 
     if (!block.__origStroke) {
       // sanitize stroke color: Blockly may not accept 8-digit hex (#RRGGBBAA)
-      var s = path.getAttribute("stroke") || "#8a1515";
+      var s = path.getAttribute("stroke") || "#000000";
       try {
         if (typeof s === "string" && /^#([0-9a-fA-F]{8})$/.test(s)) {
           // drop alpha channel
           s = "#" + s.substr(1, 6);
         }
-      } catch (e) {}
+      } catch (e) { }
       block.__origStroke = s;
       block.__origStrokeWidth = path.getAttribute("stroke-width") || 2;
     }
 
-    // Use 6-digit hex colors (mixColors ignores alpha), otherwise they render blueish.
-    let fromColor = "#8a1515";
-    let toColor = "#8a1515";
+    let fromColor = "#000000";
+    let toColor = "#000000";
     let pulse = 0;
     let direction = 1;
 
@@ -1158,7 +1157,7 @@
           if (typeof orig === "string" && /^#([0-9a-fA-F]{8})$/.test(orig)) {
             orig = "#" + orig.substr(1, 6);
           }
-        } catch (e) {}
+        } catch (e) { }
         path.setAttribute("stroke", orig);
       } else {
         path.removeAttribute("stroke");
@@ -1303,228 +1302,116 @@
   const MAX_DUP_SEQUENCE_LENGTH = 8;
   const MIN_DISTINCT_BLOCK_TYPES = 3;
 
-  function pruneDismissedAnchors(workspace) {
-    if (!workspace || dismissedSequenceAnchors.size === 0) {
-      return;
-    }
-    try {
-      const existingIds = new Set();
-      const blocks = (workspace.getAllBlocks && workspace.getAllBlocks()) || [];
-      blocks.forEach((b) => {
-        if (b && b.id) {
-          existingIds.add(b.id);
-        }
-      });
-      dismissedSequenceAnchors.forEach((id) => {
-        if (!existingIds.has(id)) {
-          dismissedSequenceAnchors.delete(id);
-        }
-      });
-    } catch (e) {}
-  }
-
-  function containsDismissedAnchor(group) {
-    if (
-      !Array.isArray(group) ||
-      group.length === 0 ||
-      dismissedSequenceAnchors.size === 0
-    ) {
-      return false;
-    }
-    let hasAny = false;
-    for (let i = 0; i < group.length; i++) {
-      const block = group[i];
-      if (!block || !block.id) {
-        return false;
-      }
-      if (!dismissedSequenceAnchors.has(block.id)) {
-        return false;
-      }
-      hasAny = true;
-    }
-    return hasAny;
-  }
-
-  function registerDismissedGroups(groups) {
-    if (!Array.isArray(groups)) {
-      return;
-    }
-    groups.forEach((group) => {
-      if (!Array.isArray(group)) {
-        return;
-      }
-      group.forEach((block) => {
-        if (block && block.id) {
-          dismissedSequenceAnchors.add(block.id);
-        }
-      });
-    });
-  }
-
-  function highlightBlockAndChildren(block) {
-    applyBorderGlow(block);
-
-    block.inputList.forEach((input) => {
-      let conn = input.connection;
-
-      if (conn && conn.targetBlock()) {
-        let child = conn.targetBlock();
-
-        while (child) {
-          highlightBlockAndChildren(child);
-          child = child.getNextBlock();
-        }
-      }
-    });
-  }
-
-  const SEQUENCE_HIGHLIGHT_PADDING = 12;
-
-  function ensureSequenceHighlightLayer(workspace) {
-    if (!workspace) {
-      return null;
-    }
-
-    if (
-      workspace.__sequenceHighlightLayer &&
-      workspace.__sequenceHighlightLayer.parentNode
-    ) {
-      return workspace.__sequenceHighlightLayer;
-    }
-
-    const parent =
-      (typeof workspace.getBubbleCanvas === "function" &&
-        workspace.getBubbleCanvas()) ||
-      (typeof workspace.getCanvas === "function" && workspace.getCanvas()) ||
-      null;
-
-    if (!parent) {
-      return null;
-    }
-
-    const layer = document.createElementNS(SVG_NS, "g");
-    layer.setAttribute("class", "or-sequence-highlight-layer");
-    layer.setAttribute("pointer-events", "none");
-    parent.appendChild(layer);
-    workspace.__sequenceHighlightLayer = layer;
-    workspace.__sequenceHighlightEntries = [];
-    return layer;
-  }
-
-  function registerSequenceHighlight(workspace, entry) {
-    if (!workspace || !entry) {
-      return;
-    }
-    if (!workspace.__sequenceHighlightEntries) {
-      workspace.__sequenceHighlightEntries = [];
-    }
-    workspace.__sequenceHighlightEntries.push(entry);
-  }
-
   function clearSequenceHighlights(workspace) {
-    if (!workspace || !workspace.__sequenceHighlightEntries) {
-      return;
+    if (!workspace) return;
+    const layer = workspace.__sequenceHighlightLayer;
+    if (layer) {
+      while (layer.firstChild) {
+        layer.removeChild(layer.firstChild);
+      }
     }
-    workspace.__sequenceHighlightEntries.forEach((entry) => {
-      if (entry && entry.interval) {
-        clearInterval(entry.interval);
-      }
-      if (entry && entry.node && entry.node.parentNode) {
-        entry.node.parentNode.removeChild(entry.node);
-      }
-    });
-    workspace.__sequenceHighlightEntries.length = 0;
-  }
-
-  function getGroupBoundingBox(group) {
-    if (!Array.isArray(group) || group.length === 0) {
-      return null;
+    if (workspace.__sequenceHighlightInterval) {
+      clearInterval(workspace.__sequenceHighlightInterval);
+      workspace.__sequenceHighlightInterval = null;
     }
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    group.forEach((block) => {
-      if (!block || typeof block.getBoundingRectangle !== "function") {
-        return;
-      }
-      const rect = block.getBoundingRectangle();
-      if (!rect || !rect.topLeft || !rect.bottomRight) {
-        return;
-      }
-      if (rect.topLeft.x < minX) minX = rect.topLeft.x;
-      if (rect.topLeft.y < minY) minY = rect.topLeft.y;
-      if (rect.bottomRight.x > maxX) maxX = rect.bottomRight.x;
-      if (rect.bottomRight.y > maxY) maxY = rect.bottomRight.y;
-    });
-
-    if (
-      !isFinite(minX) ||
-      !isFinite(minY) ||
-      !isFinite(maxX) ||
-      !isFinite(maxY)
-    ) {
-      return null;
+    // Clear the shared clones array
+    if (workspace.__highlightClones) {
+      workspace.__highlightClones.length = 0;
     }
-
-    return {
-      x: minX,
-      y: minY,
-      width: Math.max(0, maxX - minX),
-      height: Math.max(0, maxY - minY),
-    };
   }
 
   function highlightSequenceGroup(group, workspace) {
-    if (!workspace) {
-      return;
+    if (!workspace || !group || group.length === 0) return;
+
+    // 1. Ensure Layer (Behind blocks)
+    let layer = workspace.__sequenceHighlightLayer;
+    if (!layer || !layer.parentNode) {
+      const canvas = workspace.getCanvas(); // blocklyBlockCanvas
+      if (!canvas) return;
+      layer = document.createElementNS(SVG_NS, "g");
+      layer.setAttribute("class", "or-sequence-highlight-layer");
+      // Insert as first child to be BEHIND blocks
+      if (canvas.firstChild) {
+        canvas.insertBefore(layer, canvas.firstChild);
+      } else {
+        canvas.appendChild(layer);
+      }
+      workspace.__sequenceHighlightLayer = layer;
     }
-    const layer = ensureSequenceHighlightLayer(workspace);
-    if (!layer) {
-      return;
+
+    // 2. Collect all blocks (including children)
+    const allBlocks = [];
+    function collect(b) {
+      if (!b) return;
+      allBlocks.push(b);
+      b.inputList.forEach((input) => {
+        if (input.connection && input.connection.targetBlock()) {
+          let child = input.connection.targetBlock();
+          while (child) {
+            collect(child);
+            child = child.getNextBlock();
+          }
+        }
+      });
     }
+    group.forEach((b) => collect(b));
 
-    const bounds = getGroupBoundingBox(group);
-    if (!bounds) {
-      return;
+    // 3. Draw Clones
+    const clones = [];
+    allBlocks.forEach((block) => {
+      const path = block.svgPath_;
+      if (!path) return;
+
+      const clone = path.cloneNode(true);
+      const xy = block.getRelativeToSurfaceXY();
+
+      clone.setAttribute("transform", `translate(${xy.x}, ${xy.y})`);
+      clone.setAttribute("stroke-width", "8");
+      clone.setAttribute("stroke-linejoin", "round");
+      clone.setAttribute("stroke-linecap", "round");
+      clone.setAttribute("fill", "none");
+
+      // Initial color
+      clone.setAttribute("stroke", "#FF0000");
+
+      layer.appendChild(clone);
+      clones.push(clone);
+    });
+
+    // 4. Register clones for shared animation
+    if (!workspace.__highlightClones) {
+      workspace.__highlightClones = [];
     }
+    workspace.__highlightClones.push(...clones);
 
-    const rect = document.createElementNS(SVG_NS, "rect");
-    rect.setAttribute("x", bounds.x - SEQUENCE_HIGHLIGHT_PADDING);
-    rect.setAttribute("y", bounds.y - SEQUENCE_HIGHLIGHT_PADDING);
-    rect.setAttribute("width", bounds.width + SEQUENCE_HIGHLIGHT_PADDING * 2);
-    rect.setAttribute("height", bounds.height + SEQUENCE_HIGHLIGHT_PADDING * 2);
-    rect.setAttribute("rx", 18);
-    rect.setAttribute("ry", 18);
-    rect.setAttribute("fill", "none");
-    rect.setAttribute("stroke", "#c62828");
-    rect.setAttribute("stroke-width", 3);
-    rect.setAttribute("stroke-dasharray", "10 6");
-    rect.setAttribute("pointer-events", "none");
-    layer.appendChild(rect);
+    // 5. Start Shared Animation (if not already running)
+    if (!workspace.__sequenceHighlightInterval) {
+      let pulse = 0;
+      let direction = 1;
+      const fromColor = "#FF0000"; // Red
+      const toColor = "#8B0000";   // Dark Red
 
-    let pulse = 0;
-    let direction = 1;
-    const interval = setInterval(() => {
-      pulse += direction * 0.05;
-      if (pulse >= 1) direction = -1;
-      if (pulse <= 0) direction = 1;
-      const strokeColor = mixColors("#c62828", "#ff7043", pulse);
-      rect.setAttribute("stroke", strokeColor);
-    }, 70);
+      workspace.__sequenceHighlightInterval = setInterval(() => {
+        pulse += direction * 0.05;
+        if (pulse >= 1) direction = -1;
+        if (pulse <= 0) direction = 1;
 
-    registerSequenceHighlight(workspace, { node: rect, interval });
+        const color = mixColors(fromColor, toColor, pulse);
+        if (workspace.__highlightClones) {
+          workspace.__highlightClones.forEach(c => c.setAttribute("stroke", color));
+        }
+      }, 50);
+    }
   }
 
   function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
-    console.log("Highlighting function candidates...");
+
+
+    // Clear old highlights ONLY if we are about to show something new or if we find nothing.
+    // We defer clearing until we know the outcome.
     workspace.getAllBlocks().forEach((b) => {
       removeBorderGlow(b);
     });
-    clearSequenceHighlights(workspace);
-    pruneDismissedAnchors(workspace);
 
     // If no startBlock provided, try to pick the best candidate from the workspace
     if (!startBlock) {
@@ -1542,7 +1429,7 @@
               bestLen = ch.length;
               best = t;
             }
-          } catch (e) {}
+          } catch (e) { }
         }
 
         if (best && bestLen > 0) {
@@ -1560,15 +1447,12 @@
                 bestLen = ch.length;
                 best = b;
               }
-            } catch (e) {}
+            } catch (e) { }
           }
           startBlock = bestLen > 0 && best ? best : tops[0] || all[0] || null;
         }
 
-        console.log(
-          "highlightOnlyFunctionCandidates: chosen startBlock =",
-          startBlock && startBlock.type
-        );
+
       } catch (e) {
         console.warn(
           "highlightOnlyFunctionCandidates: error selecting startBlock",
@@ -1582,29 +1466,9 @@
       var topsDbg =
         (workspace.getTopBlocks && workspace.getTopBlocks(true)) || [];
       var firstTopId = topsDbg[0] && topsDbg[0].id;
-      console.log(
-        "highlightOnlyFunctionCandidates: startBlock id=",
-        sbId,
-        "tops[0] id=",
-        firstTopId,
-        "equal=",
-        sbId === firstTopId
-      );
-      console.log(
-        "highlightOnlyFunctionCandidates: startBlock object === tops[0]? ",
-        startBlock === topsDbg[0]
-      );
-      console.log(
-        "highlightOnlyFunctionCandidates: startBlock.getNextBlock exists?",
-        !!(startBlock && startBlock.getNextBlock)
-      );
-    } catch (e) {}
+    } catch (e) { }
 
     const chain = getLinearChainFromStart(startBlock) || [];
-    console.log(
-      "highlightOnlyFunctionCandidates: linear chain length =",
-      chain.length
-    );
     // If chain is empty, try a more aggressive traversal that walks top-blocks
     // and collects statement/next chains to build a usable linear sequence.
     if ((!chain || chain.length === 0) && startBlock) {
@@ -1632,7 +1496,7 @@
                       child = child.getNextBlock && child.getNextBlock();
                     }
                   }
-                } catch (e) {}
+                } catch (e) { }
               });
             }
             cur = cur.getNextBlock && cur.getNextBlock();
@@ -1655,10 +1519,6 @@
         }
 
         if (alt.length > 0) {
-          console.log(
-            "highlightOnlyFunctionCandidates: using alternative chain length =",
-            alt.length
-          );
           chain.length = 0;
           Array.prototype.push.apply(chain, alt);
         }
@@ -1682,11 +1542,11 @@
               "linearChainLen=",
               (getLinearChainFromStart(b) || []).length
             );
-          } catch (e) {}
+          } catch (e) { }
         });
 
         const all = (workspace.getAllBlocks && workspace.getAllBlocks()) || [];
-        console.warn("Repetition diagnostic: all blocks count =", all.length);
+
         all.slice(0, 30).forEach(function (b, i) {
           try {
             var hasPrev = !!(
@@ -1695,21 +1555,15 @@
               b.previousConnection.targetConnection
             );
             var hasNext = !!(b && b.getNextBlock && b.getNextBlock());
-            console.warn(
-              " all[" + i + "] type=",
-              b && b.type,
-              "hasPrev=",
-              hasPrev,
-              "hasNext=",
-              hasNext
-            );
-          } catch (e) {}
+
+          } catch (e) { }
         });
-      } catch (e) {
-        console.warn("Repetition diagnostic failed", e);
-      }
+      } catch (e) { }
     }
-    if (chain.length < SEQ_LEN) return;
+    if (chain.length < SEQ_LEN) {
+      clearSequenceHighlights(workspace);
+      return;
+    }
 
     const sequences = {};
     const minSequenceLength = Math.max(
@@ -1747,10 +1601,6 @@
         }
 
         const group = chain.slice(startIndex, startIndex + length);
-
-        if (containsDismissedAnchor(group)) {
-          continue;
-        }
         group.__startIndex = startIndex;
         const key = group.map((b) => structureKey(b)).join("|SEQ|");
 
@@ -1816,25 +1666,29 @@
       }
     });
 
-    Object.keys(sequences).forEach((key) => {
+    const sequenceKeys = Object.keys(sequences);
+    for (const key of sequenceKeys) {
       const groups = sequences[key];
       const registryEntry = structuralFunctionRegistry[key];
       const duplicateInfo = duplicateMeta[key];
 
       if (registryEntry && groups.length >= 1) {
-        const eligibleGroups = groups.filter(
-          (g) => !containsDismissedAnchor(g)
-        );
-        if (eligibleGroups.length === 0) {
-          return;
-        }
         const sequenceKey = key + "::reuse";
         if (
           promptedSignatures.has(sequenceKey) ||
           rejectedSignatures.has(sequenceKey)
         ) {
+          // If already prompted, ensure it's still highlighted (in case of redraw)
+          if (promptedSignatures.has(sequenceKey)) {
+            groups.forEach((group) => {
+              highlightSequenceGroup(group, workspace);
+            });
+          }
           return;
         }
+
+        // Found a new match! Clear old highlights first.
+        clearSequenceHighlights(workspace);
 
         const entryObj =
           typeof registryEntry === "string"
@@ -1844,10 +1698,10 @@
           return;
         }
 
-        console.log(
-          `Sequence matches existing function ${entryObj.name}, prompting reuse.`
-        );
-        eligibleGroups.forEach((group) => {
+
+
+        // Highlight the group
+        groups.forEach((group) => {
           highlightSequenceGroup(group, workspace);
         });
 
@@ -1861,7 +1715,7 @@
                 const canonicalParams = cloneParamDefinitions(
                   entryObj.params || []
                 );
-                eligibleGroups.forEach((group) => {
+                groups.forEach((group) => {
                   insertProcedureCall(
                     group,
                     entryObj.name,
@@ -1882,7 +1736,6 @@
             function () {
               clearSequenceHighlights(workspace);
               rejectedSignatures.add(sequenceKey);
-              registerDismissedGroups(eligibleGroups);
               console.log(
                 "toast Cancel clicked: user declined existing function reuse."
               );
@@ -1895,35 +1748,35 @@
 
       if (groups.length >= 2) {
         if (primaryDuplicateKey && key !== primaryDuplicateKey) {
-          return;
+          continue;
         }
         if (duplicateInfo && duplicateInfo.overshadowed) {
-          return;
+          continue;
         }
         const sequenceKey = key + "::duplicate";
         if (
           promptedSignatures.has(sequenceKey) ||
           rejectedSignatures.has(sequenceKey)
         ) {
+          // If already prompted, ensure it's still highlighted
+          if (promptedSignatures.has(sequenceKey)) {
+            duplicateGroups.forEach((group) => {
+              highlightSequenceGroup(group, workspace);
+            });
+          }
           return;
-        }
-        const rawDuplicateGroups = duplicateInfo
-          ? duplicateInfo.groups
-          : groups;
-        const duplicateGroups = rawDuplicateGroups.filter(
-          (g) => !containsDismissedAnchor(g)
-        );
-        if (duplicateGroups.length === 0) {
-          return;
-        }
-        console.log(`Found new duplicate sequence with key: ${key}`);
-        const targetGroup = duplicateGroups[1] || duplicateGroups[0];
-        if (targetGroup) {
-          highlightSequenceGroup(targetGroup, workspace);
         }
 
+        // Found a new match! Clear old highlights first.
+        clearSequenceHighlights(workspace);
+        const duplicateGroups = duplicateInfo ? duplicateInfo.groups : groups;
+
+
+        duplicateGroups.forEach((group) => {
+          highlightSequenceGroup(group, workspace);
+        });
+
         promptedSignatures.add(sequenceKey);
-        const dismissedSnapshot = duplicateGroups.slice();
 
         setTimeout(() => {
           showToastPrompt(
@@ -1941,27 +1794,29 @@
               // User said no. We can remove highlighting if we want.
               clearSequenceHighlights(workspace);
               duplicateGroups.length = 0;
-              //clearObjectStore(sequences);
-              //clearObjectStore(duplicateMeta);
+              clearObjectStore(sequences);
+              clearObjectStore(duplicateMeta);
               promptedSignatures.add(sequenceKey);
               //rejectedSignatures.clear();
               rejectedSignatures.add(sequenceKey);
-              registerDismissedGroups(dismissedSnapshot);
               console.log("toast Cancel clicked: user declined replacement.");
             }
           );
         }, 2000);
         return;
       }
-    });
+    }
+
+    // If we reached here, it means we didn't return early (no match found).
+    // So we should clear any existing highlights.
+    clearSequenceHighlights(workspace);
   }
-  //newmethod
 
   //add eventlistener for newRunBrick
   function initRunBrick(workspace) {
     let RunBrick = document.getElementById("newRunBrick");
     if (RunBrick) {
-      console.log("adding eventlistener");
+
       // must use anonymous function to pass parameters to newRunBrick()
       RunBrick.addEventListener("click", function () {
         newRunBrick(workspace);
@@ -1976,14 +1831,13 @@
     console.info("launching viewer!");
 
     //wait for viewer to be ready
-    await getCall(apiUrl + "/viewer").then((_) =>
-      console.log("Have awaited launching viewer")
+    await getCall(apiUrl + "/viewer").then((_) => { }
     );
 
     let xmlProgram = Blockly.Xml.workspaceToDom(workspace);
     let xmlTextProgram = Blockly.Xml.domToText(xmlProgram); //delete later
     //console.info("xmlProgram: ", xmlProgram);
-    console.info("xmlTextProgram: ", xmlTextProgram);
+    //console.info("xmlProgram: ", xmlProgram);
 
     //get all block-elements
     let blockElems = xmlProgram.getElementsByTagName("block");
@@ -2037,7 +1891,7 @@
   async function blockAPICalls(apiUrl, blockElements) {
     for (let index = 0; index < blockElements.length; index++) {
       const element = blockElements[index];
-      console.info(element.getAttribute("type"));
+
 
       let url = "";
       let obj;
@@ -2061,7 +1915,7 @@
             element.childNodes[2].childNodes[0].childNodes[0].childNodes[0]
               .nodeValue;
           let z = argsMap.has(val) ? argsMap.get(val) : val;
-          console.info("coordinates x, y and z: ", x, " ", y, " ", z);
+
           url = apiUrl + "/move_pos/" + x + "/" + y + "/" + z;
 
           await getCall(url);
