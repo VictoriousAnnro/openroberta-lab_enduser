@@ -41,7 +41,7 @@ require.config({
     ace: "libs/ace/ace",
     ace_lang: "libs/ace/ext-language_tools",
     blockly: "blockly/blockly_compressed",
-    blockly_local:"blockly",
+    blockly_local: "blockly",
     bootstrap: "libs/bootstrap/bootstrap.bundle.min",
     "bootstrap-table":
       "libs/bootstrap/bootstrap-table-1.22.1-dist/js/bootstrap-table.min",
@@ -275,82 +275,289 @@ require.config({
       // procedure tuples whose second element is not a block (some block
       // implementations return an arguments array). This prevents the flyout
       // from attempting to call getDescendants on non-block objects.
-      (function(){
-        try{
-          if(window.Blockly && window.Blockly.Procedures && typeof window.Blockly.Procedures.allProcedures === 'function'){
+      (function () {
+        try {
+          if (
+            window.Blockly &&
+            window.Blockly.Procedures &&
+            typeof window.Blockly.Procedures.allProcedures === "function"
+          ) {
             var _origAllProc = window.Blockly.Procedures.allProcedures;
-            window.Blockly.Procedures.allProcedures = function(ws){
-              try{
+            window.Blockly.Procedures.allProcedures = function (ws) {
+              try {
                 var res = _origAllProc.call(this, ws);
-                function ensure(arr){
-                  if(!arr) return;
-                  for(var i=0;i<arr.length;i++){
+                function ensure(arr, lookupWs) {
+                  if (!arr) return;
+                  for (var i = 0; i < arr.length; i++) {
                     var t = arr[i];
-                    if(!t) continue;
+                    if (!t) continue;
                     var cand = t[1];
-                    if(!cand || typeof cand.getDescendants !== 'function'){
-                      var def = window.Blockly.Procedures.getDefinition(t[0], ws);
-                      if(def) arr[i] = [t[0], def, t[2]];
+                    if (!cand || typeof cand.getDescendants !== "function") {
+                      var def = window.Blockly.Procedures.getDefinition(
+                        t[0],
+                        lookupWs
+                      );
+                      if (
+                        !def &&
+                        window.OR_DEF_WORKSPACE &&
+                        lookupWs !== window.OR_DEF_WORKSPACE
+                      ) {
+                        def = window.Blockly.Procedures.getDefinition(
+                          t[0],
+                          window.OR_DEF_WORKSPACE
+                        );
+                      }
+                      if (def) arr[i] = [t[0], def, t[2]];
                     }
                   }
                 }
-                ensure(res[0]); ensure(res[1]);
+                function mergeTuples(target, extra) {
+                  if (!target || !extra) return;
+                  var seen = Object.create(null);
+                  for (var i = 0; i < target.length; i++) {
+                    if (target[i] && target[i][0]) {
+                      seen[target[i][0]] = true;
+                    }
+                  }
+                  for (var j = 0; j < extra.length; j++) {
+                    var tuple = extra[j];
+                    if (!tuple || !tuple[0]) continue;
+                    if (seen[tuple[0]]) continue;
+                    target.push(tuple);
+                    seen[tuple[0]] = true;
+                  }
+                }
+
+                if (
+                  ws &&
+                  window.OR_DEF_WORKSPACE &&
+                  ws !== window.OR_DEF_WORKSPACE
+                ) {
+                  var defRes = _origAllProc.call(this, window.OR_DEF_WORKSPACE);
+                  mergeTuples(res[0], defRes && defRes[0]);
+                  mergeTuples(res[1], defRes && defRes[1]);
+                }
+
+                ensure(res[0], ws);
+                ensure(res[1], ws);
                 return res;
-              }catch(e){console.warn('allProcedures wrapper error',e);return _origAllProc.call(this, ws);} 
+              } catch (e) {
+                console.warn("allProcedures wrapper error", e);
+                return _origAllProc.call(this, ws);
+              }
             };
-            console.log('Blockly.Procedures.allProcedures patched for flyout safety');
+            console.log(
+              "Blockly.Procedures.allProcedures patched for flyout safety"
+            );
           }
-        }catch(err){console.warn('Could not apply procedures flyout patch',err)}
+        } catch (err) {
+          console.warn("Could not apply procedures flyout patch", err);
+        }
       })();
     // Try CommonJS/Node-style require first (works when bundling or running in Node)
-    (function(){
+    (function () {
       try {
-        if (typeof module === 'object' && module.exports) {
+        if (typeof module === "object" && module.exports) {
           // path relative to this file: ../blockly/functionality.js
-          window.openRobertaFunctionality = require('../blockly/functionality.js');
+          window.openRobertaFunctionality = require("../blockly/functionality.js");
         }
       } catch (e) {
         /* ignore - not running under CommonJS */
       }
     })();
 
-    
-    (function(){
+    (function () {
       // Load the functionality module (CommonJS first if bundling, then AMD)
       try {
-        if (typeof module === 'object' && module.exports) {
-          window.openRobertaFunctionality = require('../blockly/functionality.js');
+        if (typeof module === "object" && module.exports) {
+          window.openRobertaFunctionality = require("../blockly/functionality.js");
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        /* ignore */
+      }
 
-      require(['blockly_local/functionality'], function(funcMod) {
-        window.openRobertaFunctionality = window.openRobertaFunctionality || funcMod || window.openRobertaFunctionality;
-        console.log('Custom repetition scripts loaded (RequireJS)');
+      require(["blockly_local/functionality"], function (funcMod) {
+        window.openRobertaFunctionality =
+          window.openRobertaFunctionality ||
+          funcMod ||
+          window.openRobertaFunctionality;
+        console.log("Custom repetition scripts loaded (RequireJS)");
 
         // Wait until the main workspace exists before initializing and attach listener
-        (function waitForWorkspace(attemptsLeft){
-          attemptsLeft = typeof attemptsLeft === 'number' ? attemptsLeft : 100;
-          var ws = (typeof Blockly.getMainWorkspace === 'function' && Blockly.getMainWorkspace()) || Blockly.mainWorkspace;
-          if (ws && window.Blockly ) {
+        (function waitForWorkspace(attemptsLeft) {
+          attemptsLeft = typeof attemptsLeft === "number" ? attemptsLeft : 100;
+          var ws =
+            (typeof Blockly.getMainWorkspace === "function" &&
+              Blockly.getMainWorkspace()) ||
+            Blockly.mainWorkspace;
+          if (ws && window.Blockly) {
             try {
-              if (typeof Blockly.initWorkspace === 'function') {
-                try { Blockly.initWorkspace(ws); } catch (e) { /* non-fatal */ }
+              // Expose the main workspace globally so functionality.js can
+              // choose a different workspace for definition blocks if desired.
+              try {
+                window.OR_MAIN_WORKSPACE = ws;
+              } catch (e) {}
+
+              // Initialize a dedicated workspace for auto-generated
+              // procedure definitions if the container is present and
+              // we haven't already created it. This keeps the main
+              // program workspace clean while definitions live in a
+              // secondary pane on the same page.
+              try {
+                if (!window.OR_DEF_WORKSPACE) {
+                  var defContainer = document.getElementById(
+                    "definitionWorkspace"
+                  );
+                  if (defContainer && window.Blockly && ws.options) {
+                    // Derive options from the main workspace but keep
+                    // this one independent. We deliberately omit zoom
+                    // and trashcan settings to keep it simple.
+                    var baseOptions = ws.options;
+                    var defToolbox = baseOptions.toolbox;
+                    if (defToolbox) {
+                      try {
+                        if (
+                          typeof defToolbox === "object" &&
+                          typeof defToolbox.cloneNode === "function"
+                        ) {
+                          var cloned = defToolbox.cloneNode(true);
+                          if (!cloned.id && defToolbox.id) {
+                            cloned.id = defToolbox.id + "-definition";
+                          } else if (!cloned.id) {
+                            cloned.id = "definition-toolbox";
+                          }
+                          cloned.style.display = "none";
+                          defContainer.appendChild(cloned);
+                          defToolbox = cloned;
+                        } else if (typeof defToolbox === "object") {
+                          defToolbox = JSON.parse(JSON.stringify(defToolbox));
+                        }
+                      } catch (copyErr) {
+                        console.warn(
+                          "Failed to clone toolbox for definition workspace",
+                          copyErr
+                        );
+                      }
+                    }
+
+                    var defOptions = {
+                      toolbox: defToolbox,
+                      horizontalLayout: baseOptions.horizontalLayout,
+                      grid: baseOptions.grid,
+                      renderer: baseOptions.renderer,
+                      theme: baseOptions.theme,
+                      collapse: baseOptions.collapse,
+                      comments: baseOptions.comments,
+                      disable: baseOptions.disable,
+                      media: baseOptions.media,
+                      sounds: baseOptions.sounds,
+                      oneBasedIndex: baseOptions.oneBasedIndex,
+                      rtl: baseOptions.RTL,
+                    };
+
+                    window.OR_DEF_WORKSPACE = Blockly.inject(
+                      defContainer,
+                      defOptions
+                    );
+
+                    // Preserve the original main workspace reference so the
+                    // rest of the app (save/load, toolbox UI, resize logic)
+                    // continues to operate on the program workspace instead
+                    // of the definition workspace we just injected.
+                    try {
+                      if (window.OR_MAIN_WORKSPACE) {
+                        Blockly.mainWorkspace = window.OR_MAIN_WORKSPACE;
+
+                        if (!Blockly.getDefinitionWorkspace) {
+                          Blockly.getDefinitionWorkspace = function () {
+                            return window.OR_DEF_WORKSPACE;
+                          };
+                        }
+
+                        if (!Blockly.__orOriginalGetMainWorkspace) {
+                          Blockly.__orOriginalGetMainWorkspace =
+                            typeof Blockly.getMainWorkspace === "function"
+                              ? Blockly.getMainWorkspace
+                              : function () {
+                                  return Blockly.mainWorkspace;
+                                };
+                        }
+
+                        Blockly.getMainWorkspace = function () {
+                          return window.OR_MAIN_WORKSPACE;
+                        };
+                      }
+                    } catch (pointerErr) {
+                      console.warn(
+                        "Failed to restore main workspace pointer",
+                        pointerErr
+                      );
+                    }
+
+                    var defWrapper = document.getElementById(
+                      "definitionWorkspaceContainer"
+                    );
+                    if (defWrapper) {
+                      defWrapper.style.display = "block";
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn("Failed to initialize definition workspace", e);
+              }
+
+              if (typeof Blockly.initWorkspace === "function") {
+                try {
+                  Blockly.initWorkspace(ws);
+                } catch (e) {
+                  /* non-fatal */
+                }
               }
 
               try {
                 var func = window.openRobertaFunctionality;
-                if (func && typeof func.highlightOnlyFunctionCandidates === 'function') {
+                if (
+                  func &&
+                  typeof func.setupDefinitionWorkspaceToggleButton ===
+                    "function"
+                ) {
+                  try {
+                    func.setupDefinitionWorkspaceToggleButton();
+                  } catch (toggleErr) {
+                    console.warn(
+                      "Failed to initialize definition workspace toggle",
+                      toggleErr
+                    );
+                  }
+                }
+                if (
+                  func &&
+                  typeof func.highlightOnlyFunctionCandidates === "function"
+                ) {
                   var tops = (ws.getTopBlocks && ws.getTopBlocks(true)) || [];
-                  var startBlock = tops.find(function(b){ return b && (b.type === 'robControls_start' || b.type === 'start' || b.type === 'program_start'); }) || tops[0];
+                  var startBlock =
+                    tops.find(function (b) {
+                      return (
+                        b &&
+                        (b.type === "robControls_start" ||
+                          b.type === "start" ||
+                          b.type === "program_start")
+                      );
+                    }) || tops[0];
 
                   if (startBlock && !ws.__repetitionDetectorAttached) {
                     ws.__repetitionDetectorAttached = true;
                     var repTimer = null;
-                    ws.addChangeListener(function(event){
+                    ws.addChangeListener(function (event) {
                       try {
                         if (repTimer) clearTimeout(repTimer);
-                        repTimer = setTimeout(function(){
-                          try { func.highlightOnlyFunctionCandidates(ws, startBlock); } catch (e) {}
+                        repTimer = setTimeout(function () {
+                          try {
+                            func.highlightOnlyFunctionCandidates(
+                              ws,
+                              startBlock
+                            );
+                          } catch (e) {}
                         }, 250);
                       } catch (e) {}
                     });
@@ -366,22 +573,28 @@ require.config({
                   }
                 }
               } catch (inner) {
-                console.warn('Could not attach repetition detector listener', inner);
+                console.warn(
+                  "Could not attach repetition detector listener",
+                  inner
+                );
               }
-              console.log('Repetition detector initialized (deferred)');
+              console.log("Repetition detector initialized (deferred)");
 
               //newmethod
-              try { func.initRunBrick(ws); } catch (e) {}
-
+              try {
+                func.initRunBrick(ws);
+              } catch (e) {}
             } catch (e) {
-              console.error('Failed to init repetition detector', e);
+              console.error("Failed to init repetition detector", e);
             }
-
-
           } else if (attemptsLeft > 0) {
-            setTimeout(function(){ waitForWorkspace(attemptsLeft - 1); }, 150);
+            setTimeout(function () {
+              waitForWorkspace(attemptsLeft - 1);
+            }, 150);
           } else {
-            console.error('Repetition detector: workspace not available after waiting.');
+            console.error(
+              "Repetition detector: workspace not available after waiting."
+            );
           }
         })();
       });

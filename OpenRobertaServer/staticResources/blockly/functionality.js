@@ -13,6 +13,33 @@
    * Custom Procedures and Function Auto-Creator
    *
    * This module provides:
+
+// Define a simple 'move up' block: increases the end-effector Z by a specified amount (cm)
+if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActions_moveUp"]) {
+  Blockly.Blocks["naoActions_moveUp"] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField("move up by (cm)")
+        .appendField(new Blockly.FieldNumber(10, -1000, 1000, 1), "DZ");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(230);
+      this.setTooltip("Raise the robot end-effector by the given centimeters");
+    },
+  };
+}
+// Define a block to request the result be shown on the laptop screen.
+if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActions_getResultInLaptop"]) {
+  Blockly.Blocks["naoActions_getResultInLaptop"] = {
+    init: function () {
+      this.appendDummyInput().appendField("get result in laptop");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(230);
+      this.setTooltip("Show 'SUCCESS' or 'FAIL' on the laptop screen depending on analysis result");
+    },
+  };
+}
    * - Block definitions: robProcedures_mutatorarg, robProcedures_mutatorcontainer,
    *   customProcedures_defnoreturn, customProcedures_callnoreturn
    * - Auto-creation of functions from repeated block sequences
@@ -29,6 +56,139 @@
   const usedNames = new Set();
   let globalParamCounter = 0;
   const SVG_NS = "http://www.w3.org/2000/svg";
+  let definitionToggleAttached = false;
+
+  function getDefinitionWorkspaceWrapper() {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    return document.getElementById("definitionWorkspaceContainer");
+  }
+
+  function scheduleWorkspaceResize() {
+    if (
+      typeof window === "undefined" ||
+      !window.Blockly ||
+      typeof window.Blockly.svgResize !== "function"
+    ) {
+      return;
+    }
+    requestAnimationFrame(function () {
+      try {
+        if (window.OR_MAIN_WORKSPACE) {
+          window.Blockly.svgResize(window.OR_MAIN_WORKSPACE);
+        }
+        if (window.OR_DEF_WORKSPACE) {
+          window.Blockly.svgResize(window.OR_DEF_WORKSPACE);
+        }
+      } catch (e) {}
+    });
+  }
+
+  function updateDefinitionWorkspaceToggleUI(isExpanded) {
+    if (typeof document === "undefined") {
+      return;
+    }
+    var toggle = document.getElementById("definitionWorkspaceToggle");
+    if (!toggle) {
+      return;
+    }
+    var expandedLabel =
+      toggle.getAttribute("data-expanded-label") || "Hide functions";
+    var collapsedLabel =
+      toggle.getAttribute("data-collapsed-label") || "Show functions";
+    toggle.textContent = isExpanded ? expandedLabel : collapsedLabel;
+    toggle.setAttribute("aria-expanded", String(!!isExpanded));
+  }
+
+  function collapseDefinitionWorkspacePane() {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    var wrapper = getDefinitionWorkspaceWrapper();
+    if (!wrapper) {
+      return;
+    }
+
+    if (wrapper.dataset.state === "collapsed") {
+      updateDefinitionWorkspaceToggleUI(false);
+      return;
+    }
+
+    wrapper.dataset.state = "collapsed";
+    wrapper.style.pointerEvents = "none";
+    wrapper.style.width = "0";
+    wrapper.style.minWidth = "0";
+    wrapper.style.boxShadow = "none";
+    wrapper.style.borderLeft = "";
+    wrapper.style.bottom = "0";
+    wrapper.style.height = "0";
+    wrapper.setAttribute("aria-hidden", "true");
+
+    var host = document.getElementById("workspaceHost");
+    if (host) {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          host.dataset,
+          "originalPaddingRight"
+        )
+      ) {
+        host.style.paddingRight = host.dataset.originalPaddingRight;
+      } else {
+        host.style.paddingRight = "";
+      }
+    }
+
+    var blocklyDiv = document.getElementById("blocklyDiv");
+    if (blocklyDiv) {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          blocklyDiv.dataset,
+          "originalMarginRight"
+        )
+      ) {
+        blocklyDiv.style.marginRight = blocklyDiv.dataset.originalMarginRight;
+      } else {
+        blocklyDiv.style.marginRight = "";
+      }
+    }
+
+    updateDefinitionWorkspaceToggleUI(false);
+    scheduleWorkspaceResize();
+  }
+
+  function setupDefinitionWorkspaceToggleButton() {
+    if (definitionToggleAttached || typeof document === "undefined") {
+      return;
+    }
+    var toggle = document.getElementById("definitionWorkspaceToggle");
+    if (!toggle) {
+      return;
+    }
+    definitionToggleAttached = true;
+    toggle.addEventListener("click", function (evt) {
+      try {
+        evt.preventDefault();
+      } catch (e) {}
+      var wrapper = getDefinitionWorkspaceWrapper();
+      var shouldExpand = !wrapper || wrapper.dataset.state === "collapsed";
+      if (shouldExpand) {
+        revealDefinitionWorkspacePane();
+      } else {
+        collapseDefinitionWorkspacePane();
+      }
+    });
+
+    var wrapper = getDefinitionWorkspaceWrapper();
+    var isExpanded =
+      wrapper && wrapper.dataset && wrapper.dataset.state === "expanded";
+    if (!isExpanded && wrapper) {
+      wrapper.dataset.state = "collapsed";
+      wrapper.setAttribute("aria-hidden", "true");
+    }
+    updateDefinitionWorkspaceToggleUI(!!isExpanded);
+  }
 
   function showToastPrompt(message, onConfirm, onCancel) {
     // Forward to the enhanced implementation if available (defined later in file).
@@ -106,7 +266,7 @@
             } else {
               clone.setFieldValue(field.getValue(), field.name);
             }
-          } catch (e) { }
+          } catch (e) {}
         }
       });
     });
@@ -252,30 +412,37 @@
         const input = call.getInput("ARG" + i);
 
         if (input) {
-          // Create a value block based on the parameter type
+          // Create a value block based on the parameter kind/type
           let valBlock = null;
 
-          if (p.type === "Number") {
+          if (p.kind === "dropdown") {
+            valBlock = createDropdownValueBlock(workspace, p);
+          } else if (p.type === "Number") {
             valBlock = workspace.newBlock("math_number");
             try {
               valBlock.setFieldValue(String(p.originalValue), "NUM");
-            } catch (e) { }
+            } catch (e) {}
           } else if (p.type === "String") {
             valBlock = workspace.newBlock("text");
             try {
               valBlock.setFieldValue(String(p.originalValue), "TEXT");
-            } catch (e) { }
+            } catch (e) {}
           } else if (p.type === "Boolean") {
             valBlock = workspace.newBlock("logic_boolean");
             try {
               let boolVal = String(p.originalValue).toUpperCase();
               if (boolVal !== "TRUE" && boolVal !== "FALSE") boolVal = "TRUE";
               valBlock.setFieldValue(boolVal, "BOOL");
-            } catch (e) { }
+            } catch (e) {}
           }
 
           // Connect the value block
           if (valBlock) {
+            if (typeof valBlock.setShadow === "function") {
+              try {
+                valBlock.setShadow(true);
+              } catch (e) {}
+            }
             valBlock.initSvg();
             valBlock.render();
             if (valBlock.outputConnection) {
@@ -327,12 +494,12 @@
     if (block.previousConnection && block.previousConnection.targetConnection) {
       try {
         block.previousConnection.disconnect();
-      } catch (e) { }
+      } catch (e) {}
     }
     if (block.nextConnection && block.nextConnection.targetConnection) {
       try {
         block.nextConnection.disconnect();
-      } catch (e) { }
+      } catch (e) {}
     }
 
     block.inputList.forEach((input) => {
@@ -366,7 +533,7 @@
     Object.keys(fields).forEach((name) => {
       try {
         block.setFieldValue(fields[name], name);
-      } catch (e) { }
+      } catch (e) {}
     });
 
     // Create + connect children blocks
@@ -432,6 +599,205 @@
     console.log("Test done");
   }
 
+  function getDropdownOptions(field) {
+    if (!field) {
+      return [];
+    }
+
+    let options = [];
+    if (typeof field.getOptions === "function") {
+      try {
+        options = field.getOptions();
+      } catch (e) {
+        options = [];
+      }
+    } else if (Array.isArray(field.menuGenerator_)) {
+      options = field.menuGenerator_.slice();
+    } else if (typeof field.menuGenerator_ === "function") {
+      try {
+        options = field.menuGenerator_.call(field);
+      } catch (e) {
+        options = [];
+      }
+    }
+
+    if (!Array.isArray(options)) {
+      return [];
+    }
+
+    return options
+      .map((opt) => {
+        if (!Array.isArray(opt) || opt.length < 2) {
+          return null;
+        }
+        const label = opt[0] != null ? String(opt[0]) : "";
+        const value = opt[1] != null ? String(opt[1]) : "";
+        return [label, value];
+      })
+      .filter(Boolean);
+  }
+
+  function isParameterizableDropdownField(field) {
+    if (!field) {
+      return false;
+    }
+
+    if (typeof Blockly !== "undefined") {
+      if (
+        typeof Blockly.FieldVariable !== "undefined" &&
+        field instanceof Blockly.FieldVariable
+      ) {
+        return false;
+      }
+    }
+
+    if (typeof field.getValue !== "function") {
+      return false;
+    }
+
+    const options = getDropdownOptions(field);
+    if (!options.length) {
+      return false;
+    }
+
+    return options.every((opt) => typeof opt[1] === "string");
+  }
+
+  const DROPDOWN_PARAM_BLOCK_TYPE = "or_parameter_dropdown_value";
+
+  function ensureDropdownValueBlockDefinition() {
+    if (typeof Blockly === "undefined" || !Blockly.Blocks) {
+      return false;
+    }
+    if (Blockly.Blocks[DROPDOWN_PARAM_BLOCK_TYPE]) {
+      return true;
+    }
+
+    Blockly.Blocks[DROPDOWN_PARAM_BLOCK_TYPE] = {
+      init: function () {
+        this.dropdownOptions_ = [["", ""]];
+        const field = new Blockly.FieldDropdown(() =>
+          this.getDropdownOptions_()
+        );
+        this.appendDummyInput().appendField(field, "CHOICE");
+        this.setOutput(true, "String");
+        this.setColour(210);
+        this.setTooltip("Select one of the recorded options.");
+      },
+      getDropdownOptions_: function () {
+        if (
+          !Array.isArray(this.dropdownOptions_) ||
+          !this.dropdownOptions_.length
+        ) {
+          this.dropdownOptions_ = [["", ""]];
+        }
+        return this.dropdownOptions_;
+      },
+      mutationToDom: function () {
+        const container = document.createElement("mutation");
+        try {
+          container.setAttribute(
+            "options",
+            JSON.stringify(this.dropdownOptions_ || [])
+          );
+        } catch (e) {
+          container.setAttribute("options", "[]");
+        }
+        container.setAttribute("value", this.getFieldValue("CHOICE") || "");
+        return container;
+      },
+      domToMutation: function (xmlElement) {
+        const optsAttr = xmlElement.getAttribute("options");
+        if (optsAttr) {
+          try {
+            this.dropdownOptions_ = JSON.parse(optsAttr);
+          } catch (e) {
+            this.dropdownOptions_ = [["", ""]];
+          }
+        }
+        const field = this.getField("CHOICE");
+        if (field) {
+          field.menuGenerator_ = () => this.getDropdownOptions_();
+          const storedValue = xmlElement.getAttribute("value");
+          const fallback =
+            storedValue ||
+            (this.dropdownOptions_[0] ? this.dropdownOptions_[0][1] : "");
+          if (fallback) {
+            try {
+              field.setValue(fallback);
+            } catch (e) {}
+          }
+        }
+      },
+    };
+
+    return true;
+  }
+
+  function configureDropdownValueBlock(block, param) {
+    if (!block || !param) {
+      return;
+    }
+    let options = Array.isArray(param.dropdownOptions)
+      ? param.dropdownOptions
+      : [];
+    if (!options.length) {
+      const fallbackValue =
+        param.originalValue != null && String(param.originalValue).length
+          ? String(param.originalValue)
+          : param.paramName || "option";
+      options = [[fallbackValue, fallbackValue]];
+    } else {
+      options = options.map((opt) => {
+        if (!Array.isArray(opt) || opt.length < 2) {
+          return ["", ""];
+        }
+        return [
+          opt[0] != null ? String(opt[0]) : String(opt[1] || ""),
+          opt[1] != null ? String(opt[1]) : "",
+        ];
+      });
+    }
+
+    // Deduplicate by value while preserving first labels
+    const seen = new Set();
+    const deduped = [];
+    options.forEach((opt) => {
+      if (!opt[1]) {
+        return;
+      }
+      if (seen.has(opt[1])) {
+        return;
+      }
+      seen.add(opt[1]);
+      deduped.push(opt);
+    });
+    block.dropdownOptions_ = deduped.length ? deduped : [["", ""]];
+
+    const field = block.getField("CHOICE");
+    if (field) {
+      field.menuGenerator_ = () => block.getDropdownOptions_();
+      const defaultValue = deduped.find(
+        (opt) => opt[1] === String(param.originalValue)
+      )?.[1];
+      const fallback =
+        defaultValue ||
+        (block.dropdownOptions_[0] ? block.dropdownOptions_[0][1] : "");
+      try {
+        field.setValue(fallback || "");
+      } catch (e) {}
+    }
+  }
+
+  function createDropdownValueBlock(workspace, param) {
+    if (!workspace || !ensureDropdownValueBlockDefinition()) {
+      return null;
+    }
+    const block = workspace.newBlock(DROPDOWN_PARAM_BLOCK_TYPE);
+    configureDropdownValueBlock(block, param);
+    return block;
+  }
+
   /**
    * Extract all literal parameter occurrences from a block group
    */
@@ -468,33 +834,45 @@
     // 2. Naming Strategy: Strictly x, x2, x3, x4...
     // We remove the alphabetical array to ensure consistency with the definition block.
     let paramCounter = 0;
+    const dropdownNameCounters = {};
 
-    function addParamOccurrence(type, originalValue) {
+    function addParamOccurrence(type, originalValue, extraMeta = {}) {
       globalParamCounter++;
       paramCounter++;
 
       // Generate candidate name: x, x2, x3, x4...
       let candidateName =
-        globalParamCounter === 1 ? "w" : "w" + globalParamCounter;
+        globalParamCounter === 1
+          ? "parameter 1"
+          : "parameter " + globalParamCounter;
+
+      if (extraMeta.kind === "dropdown") {
+        const dropdownIndex =
+          (dropdownNameCounters[extraMeta.fieldName || "global"] || 0) + 1;
+        dropdownNameCounters[extraMeta.fieldName || "global"] = dropdownIndex;
+        candidateName = `${DROPDOWN_PARAM_NAME_PREFIX} ${dropdownIndex}`;
+      }
 
       // 3. Collision Resolution
       // If 'x' or 'x2' is already a global variable, skip it and keep incrementing
       // until we find a free name. This ensures we don't get a mismatch.
       while (usedNames.has(candidateName)) {
         globalParamCounter++;
-        candidateName = "w" + globalParamCounter;
+        candidateName = "parameter " + globalParamCounter;
       }
 
       // Reserve this name so the next parameter in *this* function doesn't use it
       usedNames.add(candidateName);
 
-      params.push({
+      const param = {
         paramName: candidateName,
         type: type,
         originalValue: originalValue,
         used: false,
-      });
-      return candidateName;
+        ...extraMeta,
+      };
+      params.push(param);
+      return param;
     }
 
     // Standard traversal
@@ -502,24 +880,82 @@
       if (!b) return;
 
       b.inputList.forEach((input) => {
+        if (Array.isArray(input.fieldRow)) {
+          input.fieldRow.forEach((field) => {
+            if (!isParameterizableDropdownField(field)) {
+              return;
+            }
+
+            let value = null;
+            try {
+              value = field.getValue();
+            } catch (e) {}
+
+            if (typeof value !== "string" || value.length === 0) {
+              return;
+            }
+
+            const dropdownParam = addParamOccurrence("String", value, {
+              kind: "dropdown",
+              fieldName: field.name || null,
+              fieldSourceType: b.type || null,
+              dropdownLabel:
+                (typeof field.getText === "function" && field.getText()) ||
+                value,
+            });
+            dropdownParam.dropdownOptions = getDropdownOptions(field);
+          });
+        }
+
         if (input.connection) {
           const child =
             input.connection.targetBlock && input.connection.targetBlock();
           if (child) {
-            // Check Number
+            // Special naming for naoActions_moveToPosition coordinates
+            if (b && b.type === "naoActions_moveToPosition") {
+              if (
+                child.type === "math_number" ||
+                child.type === "math_integer"
+              ) {
+                const v = child.getFieldValue("NUM");
+                if (v != null) {
+                  let customName = null;
+                  if (input.name === "X") {
+                    customName = "coordinate X";
+                  } else if (input.name === "Y") {
+                    customName = "coordinate Y";
+                  } else if (input.name === "Z") {
+                    customName = "coordinate Z";
+                  }
+
+                  if (customName) {
+                    params.push({
+                      paramName: customName,
+                      type: "Number",
+                      originalValue: v,
+                      used: false,
+                      kind: "literal",
+                    });
+                    usedNames.add(customName);
+                    return;
+                  }
+                }
+              }
+            }
+
+            // Default literal handling
             if (child.type === "math_number" || child.type === "math_integer") {
               const v = child.getFieldValue("NUM");
-              if (v != null) addParamOccurrence("Number", v);
-            }
-            // Check String
-            else if (child.type === "text") {
+              if (v != null)
+                addParamOccurrence("Number", v, { kind: "literal" });
+            } else if (child.type === "text") {
               const v = child.getFieldValue("TEXT");
-              if (v != null) addParamOccurrence("String", v);
-            }
-            // Check Boolean
-            else if (child.type === "logic_boolean") {
+              if (v != null)
+                addParamOccurrence("String", v, { kind: "literal" });
+            } else if (child.type === "logic_boolean") {
               const v = child.getFieldValue("BOOL");
-              if (v != null) addParamOccurrence("Boolean", v);
+              if (v != null)
+                addParamOccurrence("Boolean", v, { kind: "literal" });
             } else {
               traverseBlock(child);
               let nextBlock = child.getNextBlock();
@@ -537,6 +973,161 @@
     return params;
   }
 
+  function resolveDefinitionWorkspace(sourceWorkspace) {
+    if (typeof Blockly === "undefined") {
+      return sourceWorkspace;
+    }
+
+    try {
+      if (typeof Blockly.getDefinitionWorkspace === "function") {
+        var existing = Blockly.getDefinitionWorkspace();
+        if (existing) {
+          return existing;
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "resolveDefinitionWorkspace: error querying definition workspace",
+        e
+      );
+    }
+
+    if (typeof window !== "undefined" && window.OR_DEF_WORKSPACE) {
+      return window.OR_DEF_WORKSPACE;
+    }
+
+    if (!sourceWorkspace || !sourceWorkspace.options) {
+      return sourceWorkspace;
+    }
+
+    var host = document.getElementById("definitionWorkspace");
+    if (!host) {
+      return sourceWorkspace;
+    }
+
+    try {
+      var baseOptions = sourceWorkspace.options;
+      var defToolbox = baseOptions.toolbox;
+      if (
+        defToolbox &&
+        typeof defToolbox === "object" &&
+        typeof defToolbox.cloneNode === "function"
+      ) {
+        var cloned = defToolbox.cloneNode(true);
+        if (!cloned.id && defToolbox.id) {
+          cloned.id = defToolbox.id + "-definition";
+        } else if (!cloned.id) {
+          cloned.id = "definition-toolbox";
+        }
+        cloned.style.display = "none";
+        host.appendChild(cloned);
+        defToolbox = cloned;
+      } else if (defToolbox && typeof defToolbox === "object") {
+        defToolbox = JSON.parse(JSON.stringify(defToolbox));
+      }
+
+      var injected = Blockly.inject(host, {
+        toolbox: defToolbox,
+        horizontalLayout: baseOptions.horizontalLayout,
+        grid: baseOptions.grid,
+        renderer: baseOptions.renderer,
+        theme: baseOptions.theme,
+        collapse: baseOptions.collapse,
+        comments: baseOptions.comments,
+        disable: baseOptions.disable,
+        media: baseOptions.media,
+        sounds: baseOptions.sounds,
+        oneBasedIndex: baseOptions.oneBasedIndex,
+        rtl: baseOptions.RTL,
+      });
+
+      if (typeof window !== "undefined") {
+        window.OR_DEF_WORKSPACE = injected;
+      }
+      if (typeof Blockly.getDefinitionWorkspace !== "function") {
+        Blockly.getDefinitionWorkspace = function () {
+          return injected;
+        };
+      }
+
+      return injected;
+    } catch (e) {
+      console.warn(
+        "resolveDefinitionWorkspace: failed to inject fallback workspace",
+        e
+      );
+      return sourceWorkspace;
+    }
+  }
+
+  function revealDefinitionWorkspacePane() {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    var wrapper = document.getElementById("definitionWorkspaceContainer");
+    if (!wrapper) {
+      return;
+    }
+
+    var expandedWidthAttr = parseInt(
+      wrapper.getAttribute("data-expanded-width"),
+      10
+    );
+    var widthPx = !isNaN(expandedWidthAttr) ? expandedWidthAttr : 600;
+    var bottomClearAttr = parseInt(
+      wrapper.getAttribute("data-clear-bottom"),
+      10
+    );
+    var bottomClearPx = !isNaN(bottomClearAttr) ? bottomClearAttr : 80;
+    var widthValue = widthPx + "px";
+    var bottomValue = bottomClearPx + "px";
+
+    wrapper.style.display = "block";
+    wrapper.style.width = widthValue;
+    wrapper.style.minWidth = widthValue;
+    wrapper.style.bottom = bottomValue;
+    wrapper.style.zIndex = "2000";
+    wrapper.style.pointerEvents = "auto";
+    wrapper.style.overflow = "hidden";
+    if (!wrapper.style.backgroundColor) {
+      wrapper.style.backgroundColor = "rgba(15,23,42,0.95)";
+    }
+    if (!wrapper.style.borderLeft) {
+      wrapper.style.borderLeft = "1px solid rgba(148,163,184,0.4)";
+    }
+    if (!wrapper.style.boxShadow) {
+      wrapper.style.boxShadow = "-10px 0 24px rgba(15,23,42,0.5)";
+    }
+    wrapper.setAttribute("aria-hidden", "false");
+    wrapper.dataset.state = "expanded";
+
+    if (!wrapper.dataset.originalHeight) {
+      wrapper.dataset.originalHeight = wrapper.style.height || "";
+    }
+    wrapper.style.height = "calc(100% - " + bottomValue + ")";
+
+    var host = document.getElementById("workspaceHost");
+    if (host) {
+      if (!host.dataset.originalPaddingRight) {
+        host.dataset.originalPaddingRight = host.style.paddingRight || "";
+      }
+      host.style.paddingRight = widthValue;
+    }
+
+    var blocklyDiv = document.getElementById("blocklyDiv");
+    if (blocklyDiv) {
+      if (!blocklyDiv.dataset.originalMarginRight) {
+        blocklyDiv.dataset.originalMarginRight =
+          blocklyDiv.style.marginRight || "";
+      }
+      blocklyDiv.style.marginRight = widthValue;
+    }
+
+    updateDefinitionWorkspaceToggleUI(true);
+    scheduleWorkspaceResize();
+  }
+
   /**
    * Create a custom function from a selected block sequence
    */
@@ -546,6 +1137,20 @@
     const primaryGroup = groups[0];
     const signature = getSequenceSignature(primaryGroup);
     const structuralSignature = getStructuralSequenceSignature(primaryGroup);
+
+    const sourceWorkspace =
+      workspace ||
+      (typeof Blockly !== "undefined"
+        ? typeof Blockly.getMainWorkspace === "function"
+          ? Blockly.getMainWorkspace()
+          : Blockly.mainWorkspace || null
+        : null);
+    if (!sourceWorkspace) {
+      console.warn(
+        "createCustomBlockFromSequence: no source workspace; aborting"
+      );
+      return;
+    }
 
     if (customFunctionRegistry[signature]) {
       const existingEntry = customFunctionRegistry[signature];
@@ -560,7 +1165,12 @@
         };
       }
       groups.forEach((group) => {
-        insertProcedureCall(group, existingName, workspace, existingParams);
+        insertProcedureCall(
+          group,
+          existingName,
+          sourceWorkspace,
+          existingParams
+        );
       });
       return;
     }
@@ -575,7 +1185,10 @@
       // 1. Extract Parameters
       // OLD: const literalParams = extractLiteralParameters(group);
       // NEW:
-      const literalParams = extractLiteralParameters(primaryGroup, workspace);
+      const literalParams = extractLiteralParameters(
+        primaryGroup,
+        sourceWorkspace
+      );
       const canonicalParams = cloneParamDefinitions(literalParams);
       customFunctionRegistry[signature] = {
         name: functionName,
@@ -586,19 +1199,34 @@
         params: cloneParamDefinitions(canonicalParams),
       };
 
-      // 2. Create Variables FIRST (Critical for OpenRoberta)
-      // The block will check if these exist before drawing the rows.
-      literalParams.forEach((p) => {
-        let type =
-          p.type.charAt(0).toUpperCase() + p.type.slice(1).toLowerCase();
-        try {
-          workspace.createVariable(p.paramName, type);
-        } catch (e) { }
-      });
+      // 2. Create the Original Native Block in the target workspace.
+      // Prefer a dedicated definition workspace if one is exposed globally
+      // (e.g. a secondary Blockly.inject on the same page). Fallback to
+      // the workspace where the sequence was detected.
+      const targetWs =
+        resolveDefinitionWorkspace(sourceWorkspace) || sourceWorkspace;
+      if (!targetWs) {
+        console.warn(
+          "createCustomBlockFromSequence: no target workspace available"
+        );
+        return;
+      }
 
-      // 3. Create the Original Native Block
-      // We do NOT use XML creation here, we use newBlock to get the standard init()
-      const def = workspace.newBlock("robProcedures_defnoreturn");
+      const usingDedicatedWorkspace = targetWs !== sourceWorkspace;
+      if (usingDedicatedWorkspace) {
+        revealDefinitionWorkspacePane();
+      }
+
+      // Ensure the parameter variables already exist in the destination
+      // workspace before domToMutation() runs, otherwise Open Roberta will
+      // refuse to draw the declaration rows for those arguments.
+      seedDefinitionVariables(targetWs, literalParams);
+      if (usingDedicatedWorkspace) {
+        seedDefinitionVariables(sourceWorkspace, literalParams);
+      }
+
+      // We do NOT use XML creation here, we use newBlock to get the standard init().
+      const def = targetWs.newBlock("robProcedures_defnoreturn");
       def.initSvg();
       def.render();
       for (let i = 0; i < literalParams.length; i++) {
@@ -635,8 +1263,10 @@
         def.domToMutation(mutationElement);
 
         // Ensure the declaration blocks reflect the detected names and types.
-        syncParameterDeclarations(def, literalParams, workspace);
+        syncParameterDeclarations(def, literalParams, targetWs);
       }
+
+      refreshProcedureCallers(def);
 
       // 6. Fill the Stack
       const doInput = def.getInput("STACK");
@@ -646,7 +1276,7 @@
         let prevClone = null;
 
         for (let block of primaryGroup) {
-          const cloned = cloneRobertaBlock(block, workspace, primaryGroup);
+          const cloned = cloneRobertaBlock(block, targetWs, primaryGroup);
           if (!firstClone) {
             firstClone = cloned;
             if (cloned.previousConnection)
@@ -660,15 +1290,26 @@
         }
 
         if (literalParams.length > 0 && firstClone) {
-          replaceBlockLiterals(firstClone, literalParams, workspace);
+          // Replace literals inside the cloned body using the same
+          // workspace that owns the definition (targetWs). Using the
+          // original workspace here would try to connect blocks across
+          // workspaces and throw "Blocks not on same workspace".
+          replaceBlockLiterals(firstClone, literalParams, targetWs);
         }
       }
 
-
+      if (usingDedicatedWorkspace) {
+        createHiddenDefinitionMirror(def, sourceWorkspace);
+      }
 
       // 7. Replace with Calls
       groups.forEach((group) => {
-        insertProcedureCall(group, functionName, workspace, canonicalParams);
+        insertProcedureCall(
+          group,
+          functionName,
+          sourceWorkspace,
+          canonicalParams
+        );
       });
 
       // Position
@@ -676,6 +1317,70 @@
         const xy = primaryGroup[0].getRelativeToSurfaceXY();
         def.moveBy(xy.x + 50, xy.y + 50);
       }
+      // Inform the user where to inspect the new reusable component with a
+      // small, styled toast instead of a blocking browser alert.
+      try {
+        var note = document.createElement("div");
+        note.className = "or-toast or-toast-info";
+        note.style.position = "fixed";
+        note.style.right = "20px";
+        note.style.bottom = "20px";
+        note.style.zIndex = 20000;
+        note.style.background = "#1f2933";
+        note.style.color = "#f9fafb";
+        note.style.padding = "10px 14px";
+        note.style.borderRadius = "8px";
+        note.style.boxShadow = "0 4px 18px rgba(0,0,0,0.35)";
+        note.style.fontFamily = "Arial, sans-serif";
+        note.style.fontSize = "13px";
+        note.style.maxWidth = "280px";
+        note.style.display = "flex";
+        note.style.alignItems = "flex-start";
+
+        var icon = document.createElement("span");
+        icon.textContent = "?";
+        icon.style.display = "inline-flex";
+        icon.style.alignItems = "center";
+        icon.style.justifyContent = "center";
+        icon.style.width = "20px";
+        icon.style.height = "20px";
+        icon.style.marginRight = "8px";
+        icon.style.borderRadius = "50%";
+        icon.style.background = "#3b82f6";
+        icon.style.color = "#fff";
+        icon.style.fontWeight = "bold";
+        icon.style.flexShrink = "0";
+
+        var text = document.createElement("div");
+        text.textContent =
+          "You can now see your created reusable component block in the above workspace that has dark background!";
+
+        var closeBtn = document.createElement("button");
+        closeBtn.textContent = "×";
+        closeBtn.style.marginLeft = "10px";
+        closeBtn.style.border = "none";
+        closeBtn.style.background = "transparent";
+        closeBtn.style.color = "#9ca3af";
+        closeBtn.style.cursor = "pointer";
+        closeBtn.style.fontSize = "14px";
+        closeBtn.onclick = function () {
+          try {
+            note.remove();
+          } catch (e) {}
+        };
+
+        note.appendChild(icon);
+        note.appendChild(text);
+        note.appendChild(closeBtn);
+
+        document.body.appendChild(note);
+
+        setTimeout(function () {
+          try {
+            note.remove();
+          } catch (e) {}
+        }, 6000);
+      } catch (e) {}
     } catch (e) {
       console.error("Error creating custom block:", e);
     } finally {
@@ -716,6 +1421,117 @@
     }
 
     return model;
+  }
+
+  function seedDefinitionVariables(workspace, literalParams) {
+    if (!workspace || !Array.isArray(literalParams) || !literalParams.length) {
+      return;
+    }
+
+    literalParams.forEach((param) => {
+      if (!param || !param.paramName) {
+        return;
+      }
+      const model = getOrCreateVariableModel(workspace, param);
+      if (model && typeof model.getId === "function") {
+        param.variableId = model.getId();
+      } else if (!param.variableId) {
+        param.variableId = param.paramName;
+      }
+    });
+  }
+
+  function parkHiddenDefinitionBlock(block, workspace, orderIndex) {
+    if (!block || !workspace) {
+      return;
+    }
+
+    var index =
+      typeof orderIndex === "number" && orderIndex >= 0 ? orderIndex : 0;
+    var targetX = 32;
+    var targetY = 32 + index * 24;
+
+    try {
+      var current = block.getRelativeToSurfaceXY
+        ? block.getRelativeToSurfaceXY()
+        : null;
+      if (current) {
+        block.moveBy(targetX - current.x, targetY - current.y);
+      }
+    } catch (e) {}
+  }
+
+  function createHiddenDefinitionMirror(defBlock, sourceWorkspace) {
+    if (
+      !defBlock ||
+      !sourceWorkspace ||
+      defBlock.workspace === sourceWorkspace ||
+      typeof Blockly === "undefined" ||
+      !Blockly.Xml ||
+      typeof Blockly.Xml.blockToDom !== "function" ||
+      typeof Blockly.Xml.domToBlock !== "function"
+    ) {
+      return;
+    }
+
+    try {
+      var nameField = defBlock.getField && defBlock.getField("NAME");
+      var signature = nameField ? nameField.getValue() : defBlock.id;
+      var registryKey = "hidden::" + signature;
+
+      if (!sourceWorkspace.__orHiddenDefinitions) {
+        sourceWorkspace.__orHiddenDefinitions = Object.create(null);
+      }
+      if (sourceWorkspace.__orHiddenDefinitions[registryKey]) {
+        try {
+          sourceWorkspace.__orHiddenDefinitions[registryKey].dispose(false);
+        } catch (e) {}
+        delete sourceWorkspace.__orHiddenDefinitions[registryKey];
+      }
+
+      var hiddenOrderIndex = Object.keys(
+        sourceWorkspace.__orHiddenDefinitions
+      ).filter(function (key) {
+        return key && key.indexOf("hidden::") === 0;
+      }).length;
+
+      const domList = [];
+      var dom = Blockly.Xml.blockToDom(defBlock, domList);
+      dom = domList && domList.length ? domList[0] : dom;
+      if (dom && dom.setAttribute) {
+        dom.removeAttribute("id");
+      }
+      dom.setAttribute("collapsed", "true");
+      dom.setAttribute("deletable", "false");
+      dom.setAttribute("movable", "false");
+      dom.setAttribute("editable", "false");
+      dom.setAttribute("hidden-definition", "true");
+
+      var hiddenBlock = Blockly.Xml.domToBlock(dom, sourceWorkspace);
+      hiddenBlock.setCollapsed(true);
+      hiddenBlock.setDeletable(false);
+      hiddenBlock.setMovable(false);
+      hiddenBlock.setEditable(false);
+      hiddenBlock.setWarningText(null);
+      if (typeof hiddenBlock.setCommentText === "function") {
+        try {
+          hiddenBlock.setCommentText(null);
+        } catch (e) {}
+      }
+      hiddenBlock.__orHiddenDefinition = true;
+      parkHiddenDefinitionBlock(hiddenBlock, sourceWorkspace, hiddenOrderIndex);
+      var root = hiddenBlock.getSvgRoot && hiddenBlock.getSvgRoot();
+      if (root) {
+        root.style.display = "none";
+        root.style.pointerEvents = "none";
+      }
+
+      refreshProcedureCallers(hiddenBlock);
+
+      sourceWorkspace.__orHiddenDefinitions[registryKey] = hiddenBlock;
+    } catch (e) {
+      console.warn("createHiddenDefinitionMirror failed", e);
+    }
   }
 
   function syncParameterDeclarations(defBlock, literalParams, workspace) {
@@ -784,16 +1600,70 @@
     }
   }
 
+  function refreshProcedureCallers(defBlock) {
+    if (!defBlock || typeof Blockly === "undefined" || !Blockly.Procedures) {
+      return;
+    }
+
+    try {
+      if (typeof Blockly.Procedures.mutateCallers === "function") {
+        Blockly.Procedures.mutateCallers(defBlock);
+      } else if (typeof Blockly.Procedures.updateCallers === "function") {
+        Blockly.Procedures.updateCallers(defBlock);
+      }
+    } catch (e) {
+      console.warn("refreshProcedureCallers failed", e);
+    }
+  }
+
   function replaceBlockLiterals(block, literalParams, workspace) {
     if (!block) return;
 
-    let nextParamIndex = 0;
+    const literalQueue = literalParams.filter((p) => p.kind !== "dropdown");
+    let nextLiteralIndex = 0;
 
-    const takeNextParam = () => {
-      if (nextParamIndex >= literalParams.length) {
+    const dropdownQueues = new Map();
+    literalParams
+      .filter((p) => p.kind === "dropdown")
+      .forEach((param) => {
+        const key = buildDropdownKey(param.fieldSourceType, param.fieldName);
+        if (!dropdownQueues.has(key)) {
+          dropdownQueues.set(key, []);
+        }
+        dropdownQueues.get(key).push(param);
+      });
+
+    const takeNextLiteralParam = () => {
+      if (nextLiteralIndex >= literalQueue.length) {
         return null;
       }
-      const param = literalParams[nextParamIndex++];
+      const param = literalQueue[nextLiteralIndex++];
+      param.used = true;
+      return param;
+    };
+
+    const takeDropdownParamForField = (field, sourceBlock) => {
+      if (!field) {
+        return null;
+      }
+      const sourceType =
+        (sourceBlock && sourceBlock.type) ||
+        (field.sourceBlock_ && field.sourceBlock_.type) ||
+        "";
+      const key = buildDropdownKey(sourceType, field.name);
+      let queue = dropdownQueues.get(key);
+
+      if (!queue || queue.length === 0) {
+        // fallback: try matching just by field name
+        const fallbackKey = buildDropdownKey("", field.name);
+        queue = dropdownQueues.get(fallbackKey);
+      }
+
+      if (!queue || queue.length === 0) {
+        return null;
+      }
+
+      const param = queue.shift();
       param.used = true;
       return param;
     };
@@ -808,17 +1678,40 @@
       );
     };
 
+    const tryReplaceDropdownField = (field, sourceBlock) => {
+      if (!field) {
+        return;
+      }
+
+      const candidate = takeDropdownParamForField(field, sourceBlock);
+      if (!candidate) {
+        return;
+      }
+
+      const label = candidate.paramName || candidate.dropdownLabel || "";
+      ensureDropdownHasParameterOption(field, label, candidate.paramName);
+      try {
+        field.setValue(candidate.paramName);
+      } catch (e) {}
+    };
+
     const walk = (current) => {
       if (!current) return;
 
       current.inputList.forEach((input) => {
+        if (Array.isArray(input.fieldRow)) {
+          input.fieldRow.forEach((field) => {
+            tryReplaceDropdownField(field, current);
+          });
+        }
+
         const target = input.connection && input.connection.targetBlock();
         if (!target) {
           return;
         }
 
         if (isLiteralBlock(target)) {
-          const matchedParam = takeNextParam();
+          const matchedParam = takeNextLiteralParam();
           if (!matchedParam) {
             return;
           }
@@ -860,6 +1753,37 @@
     };
 
     walk(block);
+  }
+
+  function buildDropdownKey(sourceType, fieldName) {
+    return `${sourceType || "__any"}::${fieldName || "__field"}`;
+  }
+
+  function ensureDropdownHasParameterOption(field, label, value) {
+    if (!field || typeof value !== "string" || !value.length) {
+      return;
+    }
+
+    const normalizedLabel = label && label.length ? label : value;
+    const existingOptions = getDropdownOptions(field);
+    const hasOption = existingOptions.some((opt) => opt[1] === value);
+
+    if (hasOption) {
+      if (
+        typeof field.menuGenerator_ === "function" &&
+        Array.isArray(existingOptions)
+      ) {
+        field.menuGenerator_ = existingOptions.slice();
+      }
+      return;
+    }
+
+    if (Array.isArray(field.menuGenerator_)) {
+      field.menuGenerator_.push([normalizedLabel, value]);
+    } else {
+      const updated = existingOptions.concat([[normalizedLabel, value]]);
+      field.menuGenerator_ = updated;
+    }
   }
 
   function cloneParamDefinitions(params) {
@@ -973,7 +1897,7 @@
         try {
           console.log("showToastPrompt: OK clicked");
           toast.remove();
-        } catch (e) { }
+        } catch (e) {}
         try {
           onConfirm();
         } catch (err) {
@@ -987,7 +1911,7 @@
         try {
           console.log("showToastPrompt: Cancel clicked");
           toast.remove();
-        } catch (e) { }
+        } catch (e) {}
         try {
           onCancel();
         } catch (err) {
@@ -1007,7 +1931,7 @@
         if (field.name && typeof field.getValue === "function") {
           try {
             clone.setFieldValue(field.getValue(), field.name);
-          } catch (e) { }
+          } catch (e) {}
         }
       });
     });
@@ -1100,7 +2024,7 @@
   // ============================================================================
   // VISUAL HIGHLIGHTING AND DESIGN
   // ============================================================================
-
+  /*
   function applyBorderGlow(block) {
     if (block.__borderInterval) return;
 
@@ -1137,48 +2061,69 @@
       path.setAttribute("stroke-width", 4);
     }, 50);
   }
-
+*/
   function removeBorderGlow(block) {
+    if (!block) return;
+
     if (block.__borderInterval) {
       clearInterval(block.__borderInterval);
       block.__borderInterval = null;
     }
 
-    const root = block.getSvgRoot();
-    if (!root) return;
+    const hasStrokeData =
+      block.__origStroke != null ||
+      block.__origStrokeWidth != null ||
+      block.__origStrokeOp != null;
 
-    const paths = root.querySelectorAll("path");
-
-    paths.forEach((path) => {
-      if (block.__origStroke != null) {
-        // sanitize before applying: remove alpha if present
-        var orig = block.__origStroke;
-        try {
-          if (typeof orig === "string" && /^#([0-9a-fA-F]{8})$/.test(orig)) {
-            orig = "#" + orig.substr(1, 6);
+    if (hasStrokeData) {
+      const root = block.getSvgRoot();
+      if (root) {
+        const paths = root.querySelectorAll("path");
+        paths.forEach((path) => {
+          if (block.__origStroke != null) {
+            var orig = block.__origStroke;
+            try {
+              if (
+                typeof orig === "string" &&
+                /^#([0-9a-fA-F]{8})$/.test(orig)
+              ) {
+                orig = "#" + orig.substr(1, 6);
+              }
+            } catch (e) {}
+            path.setAttribute("stroke", orig);
+          } else {
+            path.removeAttribute("stroke");
           }
-        } catch (e) { }
-        path.setAttribute("stroke", orig);
-      } else {
-        path.removeAttribute("stroke");
+
+          if (block.__origStrokeWidth != null) {
+            path.setAttribute("stroke-width", block.__origStrokeWidth);
+          } else {
+            path.removeAttribute("stroke-width");
+          }
+
+          if (block.__origStrokeOp != null) {
+            path.setAttribute("stroke-opacity", block.__origStrokeOp);
+          } else {
+            path.removeAttribute("stroke-opacity");
+          }
+        });
       }
 
-      if (block.__origStrokeWidth != null) {
-        path.setAttribute("stroke-width", block.__origStrokeWidth);
-      } else {
-        path.removeAttribute("stroke-width");
-      }
+      delete block.__origStroke;
+      delete block.__origStrokeWidth;
+      delete block.__origStrokeOp;
+    }
 
-      if (block.__origStrokeOp != null) {
-        path.setAttribute("stroke-opacity", block.__origStrokeOp);
-      } else {
-        path.removeAttribute("stroke-opacity");
-      }
-    });
-
-    delete block.__origStroke;
-    delete block.__origStrokeWidth;
-    delete block.__origStrokeOp;
+    if (
+      Object.prototype.hasOwnProperty.call(block, "__dupOrigColour") &&
+      block.__dupOrigColour != null &&
+      typeof block.setColour === "function"
+    ) {
+      try {
+        block.setColour(block.__dupOrigColour);
+      } catch (e) {}
+    }
+    delete block.__dupOrigColour;
   }
 
   function mixColors(color1, color2, amount) {
@@ -1287,12 +2232,84 @@
   }
 
   function getLinearChainFromStart(startBlock) {
-    let chain = [];
-    let b = startBlock.getNextBlock();
+    // Build a linear chain starting from the block after `startBlock`.
+    // Additionally, descend into any statement-inputs (e.g. the DO section
+    // of IF/REPEAT blocks) and include those blocks (and their next-chains)
+    // inline so the duplicate-detection can find repeated sequences that
+    // occur inside nested statement bodies.
+    const chain = [];
+    if (!startBlock) return chain;
 
+    // Use a visited set to avoid adding the same block multiple times
+    const visited = new Set();
+
+    // Also include statement-inputs that belong to the startBlock itself
+    try {
+      if (Array.isArray(startBlock.inputList) && startBlock.inputList.length) {
+        startBlock.inputList.forEach((input) => {
+          try {
+            if (input && input.connection && input.connection.targetBlock) {
+              let child = input.connection.targetBlock();
+              while (child) {
+                if (!visited.has(child.id)) {
+                  chain.push(child);
+                  visited.add(child.id);
+                }
+                // include child's subsequent next-chain as well
+                let nc = child.getNextBlock && child.getNextBlock();
+                while (nc) {
+                  if (!visited.has(nc.id)) {
+                    chain.push(nc);
+                    visited.add(nc.id);
+                  }
+                  nc = nc.getNextBlock && nc.getNextBlock();
+                }
+                child = child.getNextBlock && child.getNextBlock();
+              }
+            }
+          } catch (e) {}
+        });
+      }
+    } catch (e) {}
+
+    let b = startBlock.getNextBlock && startBlock.getNextBlock();
     while (b) {
-      chain.push(b);
-      b = b.getNextBlock();
+      try {
+        if (!visited.has(b.id)) {
+          chain.push(b);
+          visited.add(b.id);
+        }
+
+        // For each statement input on this block, inline its contained
+        // chain (this handles IF/REPEAT 'do' sections).
+        if (Array.isArray(b.inputList) && b.inputList.length) {
+          b.inputList.forEach((input) => {
+            try {
+              if (input && input.connection && input.connection.targetBlock) {
+                let child = input.connection.targetBlock();
+                while (child) {
+                  if (!visited.has(child.id)) {
+                    chain.push(child);
+                    visited.add(child.id);
+                  }
+                  // include child's subsequent next-chain as well
+                  let nc = child.getNextBlock && child.getNextBlock();
+                  while (nc) {
+                    if (!visited.has(nc.id)) {
+                      chain.push(nc);
+                      visited.add(nc.id);
+                    }
+                    nc = nc.getNextBlock && nc.getNextBlock();
+                  }
+                  child = child.getNextBlock && child.getNextBlock();
+                }
+              }
+            } catch (e) {}
+          });
+        }
+      } catch (e) {}
+
+      b = b.getNextBlock && b.getNextBlock();
     }
 
     return chain;
@@ -1301,6 +2318,96 @@
   const MIN_DUP_SEQUENCE_LENGTH = 3;
   const MAX_DUP_SEQUENCE_LENGTH = 8;
   const MIN_DISTINCT_BLOCK_TYPES = 3;
+  const DUPLICATE_SEQUENCE_COLORS = ["#43c208", "#43c208"];
+  const DUPLICATE_SEQUENCE_ANIMATION_INTERVAL_MS = 450;
+  const DROPDOWN_PARAM_NAME_PREFIX = "Chemistry Object";
+
+  function getActiveDuplicateColour(workspace) {
+    if (!Array.isArray(DUPLICATE_SEQUENCE_COLORS) || !workspace) {
+      return DUPLICATE_SEQUENCE_COLORS[0] || "#43c208";
+    }
+    if (
+      typeof workspace.__dupColourIndex !== "number" ||
+      workspace.__dupColourIndex < 0
+    ) {
+      workspace.__dupColourIndex = 0;
+    }
+    const paletteSize = DUPLICATE_SEQUENCE_COLORS.length;
+    if (paletteSize === 0) {
+      return "#22c55e";
+    }
+    return DUPLICATE_SEQUENCE_COLORS[workspace.__dupColourIndex % paletteSize];
+  }
+
+  function applyDuplicateColour(block, workspace, overrideColour) {
+    if (
+      !block ||
+      typeof block.getColour !== "function" ||
+      typeof block.setColour !== "function"
+    ) {
+      return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(block, "__dupOrigColour")) {
+      try {
+        block.__dupOrigColour = block.getColour();
+      } catch (e) {
+        block.__dupOrigColour = null;
+      }
+    }
+    const colour = overrideColour || getActiveDuplicateColour(workspace);
+    try {
+      block.setColour(colour);
+    } catch (e) {}
+  }
+
+  function ensureDuplicateHighlightAnimation(workspace) {
+    if (!workspace) return;
+    if (
+      !workspace.__dupColoredBlocks ||
+      workspace.__dupColoredBlocks.size === 0
+    ) {
+      return;
+    }
+    if (
+      !Array.isArray(DUPLICATE_SEQUENCE_COLORS) ||
+      DUPLICATE_SEQUENCE_COLORS.length < 2
+    ) {
+      return;
+    }
+    if (workspace.__sequenceHighlightInterval) {
+      return;
+    }
+
+    workspace.__sequenceHighlightInterval = setInterval(() => {
+      if (
+        !workspace.__dupColoredBlocks ||
+        workspace.__dupColoredBlocks.size === 0
+      ) {
+        clearSequenceHighlights(workspace);
+        return;
+      }
+
+      const paletteSize = DUPLICATE_SEQUENCE_COLORS.length;
+      if (paletteSize < 2) {
+        return;
+      }
+
+      const currentIndex =
+        typeof workspace.__dupColourIndex === "number"
+          ? workspace.__dupColourIndex
+          : 0;
+      workspace.__dupColourIndex = (currentIndex + 1) % paletteSize;
+      const nextColour = getActiveDuplicateColour(workspace);
+
+      workspace.__dupColoredBlocks.forEach((block) => {
+        if (!block) return;
+        if (typeof block.isDisposed === "function" && block.isDisposed()) {
+          return;
+        }
+        applyDuplicateColour(block, workspace, nextColour);
+      });
+    }, DUPLICATE_SEQUENCE_ANIMATION_INTERVAL_MS);
+  }
 
   function clearSequenceHighlights(workspace) {
     if (!workspace) return;
@@ -1314,99 +2421,66 @@
       clearInterval(workspace.__sequenceHighlightInterval);
       workspace.__sequenceHighlightInterval = null;
     }
+    workspace.__dupColourIndex = 0;
     // Clear the shared clones array
     if (workspace.__highlightClones) {
       workspace.__highlightClones.length = 0;
+    }
+    if (workspace.__dupColoredBlocks && workspace.__dupColoredBlocks.size) {
+      workspace.__dupColoredBlocks.forEach((block) => {
+        removeBorderGlow(block);
+      });
+      workspace.__dupColoredBlocks.clear();
     }
   }
 
   function highlightSequenceGroup(group, workspace) {
     if (!workspace || !group || group.length === 0) return;
 
-    // 1. Ensure Layer (Behind blocks)
-    let layer = workspace.__sequenceHighlightLayer;
-    if (!layer || !layer.parentNode) {
-      const canvas = workspace.getCanvas(); // blocklyBlockCanvas
-      if (!canvas) return;
-      layer = document.createElementNS(SVG_NS, "g");
-      layer.setAttribute("class", "or-sequence-highlight-layer");
-      // Insert as first child to be BEHIND blocks
-      if (canvas.firstChild) {
-        canvas.insertBefore(layer, canvas.firstChild);
-      } else {
-        canvas.appendChild(layer);
+    if (!workspace.__dupColoredBlocks) {
+      workspace.__dupColoredBlocks = new Set();
+    }
+
+    const visited = new Set();
+
+    function tintBlockTree(block) {
+      if (!block) return;
+
+      const blockId = block.id || block;
+      if (visited.has(blockId)) {
+        return;
       }
-      workspace.__sequenceHighlightLayer = layer;
-    }
+      visited.add(blockId);
 
-    // 2. Collect all blocks (including children)
-    const allBlocks = [];
-    function collect(b) {
-      if (!b) return;
-      allBlocks.push(b);
-      b.inputList.forEach((input) => {
-        if (input.connection && input.connection.targetBlock()) {
-          let child = input.connection.targetBlock();
-          while (child) {
-            collect(child);
-            child = child.getNextBlock();
+      if (
+        typeof block.getColour === "function" &&
+        typeof block.setColour === "function"
+      ) {
+        applyDuplicateColour(block, workspace);
+      }
+      workspace.__dupColoredBlocks.add(block);
+
+      if (Array.isArray(block.inputList)) {
+        block.inputList.forEach((input) => {
+          if (
+            input.connection &&
+            typeof input.connection.targetBlock === "function"
+          ) {
+            let child = input.connection.targetBlock();
+            while (child) {
+              tintBlockTree(child);
+              child = child.getNextBlock ? child.getNextBlock() : null;
+            }
           }
-        }
-      });
+        });
+      }
     }
-    group.forEach((b) => collect(b));
 
-    // 3. Draw Clones
-    const clones = [];
-    allBlocks.forEach((block) => {
-      const path = block.svgPath_;
-      if (!path) return;
-
-      const clone = path.cloneNode(true);
-      const xy = block.getRelativeToSurfaceXY();
-
-      clone.setAttribute("transform", `translate(${xy.x}, ${xy.y})`);
-      clone.setAttribute("stroke-width", "8");
-      clone.setAttribute("stroke-linejoin", "round");
-      clone.setAttribute("stroke-linecap", "round");
-      clone.setAttribute("fill", "none");
-
-      // Initial color
-      clone.setAttribute("stroke", "#FF0000");
-
-      layer.appendChild(clone);
-      clones.push(clone);
-    });
-
-    // 4. Register clones for shared animation
-    if (!workspace.__highlightClones) {
-      workspace.__highlightClones = [];
-    }
-    workspace.__highlightClones.push(...clones);
-
-    // 5. Start Shared Animation (if not already running)
-    if (!workspace.__sequenceHighlightInterval) {
-      let pulse = 0;
-      let direction = 1;
-      const fromColor = "#FF0000"; // Red
-      const toColor = "#8B0000";   // Dark Red
-
-      workspace.__sequenceHighlightInterval = setInterval(() => {
-        pulse += direction * 0.05;
-        if (pulse >= 1) direction = -1;
-        if (pulse <= 0) direction = 1;
-
-        const color = mixColors(fromColor, toColor, pulse);
-        if (workspace.__highlightClones) {
-          workspace.__highlightClones.forEach(c => c.setAttribute("stroke", color));
-        }
-      }, 50);
-    }
+    group.forEach((blk) => tintBlockTree(blk));
+    ensureDuplicateHighlightAnimation(workspace);
   }
 
   function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
-
-
     // Clear old highlights ONLY if we are about to show something new or if we find nothing.
     // We defer clearing until we know the outcome.
     workspace.getAllBlocks().forEach((b) => {
@@ -1429,7 +2503,7 @@
               bestLen = ch.length;
               best = t;
             }
-          } catch (e) { }
+          } catch (e) {}
         }
 
         if (best && bestLen > 0) {
@@ -1447,12 +2521,10 @@
                 bestLen = ch.length;
                 best = b;
               }
-            } catch (e) { }
+            } catch (e) {}
           }
           startBlock = bestLen > 0 && best ? best : tops[0] || all[0] || null;
         }
-
-
       } catch (e) {
         console.warn(
           "highlightOnlyFunctionCandidates: error selecting startBlock",
@@ -1466,7 +2538,7 @@
       var topsDbg =
         (workspace.getTopBlocks && workspace.getTopBlocks(true)) || [];
       var firstTopId = topsDbg[0] && topsDbg[0].id;
-    } catch (e) { }
+    } catch (e) {}
 
     const chain = getLinearChainFromStart(startBlock) || [];
     // If chain is empty, try a more aggressive traversal that walks top-blocks
@@ -1496,7 +2568,7 @@
                       child = child.getNextBlock && child.getNextBlock();
                     }
                   }
-                } catch (e) { }
+                } catch (e) {}
               });
             }
             cur = cur.getNextBlock && cur.getNextBlock();
@@ -1542,7 +2614,7 @@
               "linearChainLen=",
               (getLinearChainFromStart(b) || []).length
             );
-          } catch (e) { }
+          } catch (e) {}
         });
 
         const all = (workspace.getAllBlocks && workspace.getAllBlocks()) || [];
@@ -1555,10 +2627,9 @@
               b.previousConnection.targetConnection
             );
             var hasNext = !!(b && b.getNextBlock && b.getNextBlock());
-
-          } catch (e) { }
+          } catch (e) {}
         });
-      } catch (e) { }
+      } catch (e) {}
     }
     if (chain.length < SEQ_LEN) {
       clearSequenceHighlights(workspace);
@@ -1698,8 +2769,6 @@
           return;
         }
 
-
-
         // Highlight the group
         groups.forEach((group) => {
           highlightSequenceGroup(group, workspace);
@@ -1771,7 +2840,6 @@
         clearSequenceHighlights(workspace);
         const duplicateGroups = duplicateInfo ? duplicateInfo.groups : groups;
 
-
         duplicateGroups.forEach((group) => {
           highlightSequenceGroup(group, workspace);
         });
@@ -1816,7 +2884,6 @@
   function initRunBrick(workspace) {
     let RunBrick = document.getElementById("newRunBrick");
     if (RunBrick) {
-
       // must use anonymous function to pass parameters to newRunBrick()
       RunBrick.addEventListener("click", function () {
         newRunBrick(workspace);
@@ -1831,8 +2898,7 @@
     console.info("launching viewer!");
 
     //wait for viewer to be ready
-    await getCall(apiUrl + "/viewer").then((_) => { }
-    );
+    await getCall(apiUrl + "/viewer").then((_) => {});
 
     let xmlProgram = Blockly.Xml.workspaceToDom(workspace);
     let xmlTextProgram = Blockly.Xml.domToText(xmlProgram); //delete later
@@ -1854,9 +2920,32 @@
   //map for defined arguments
   let argsMap = new Map();
 
+  function normalizeArgKey(raw) {
+    if (raw == null) {
+      return raw;
+    }
+    if (typeof raw === "string") {
+      return raw.trim();
+    }
+    return raw;
+  }
+
+  function resolveArgumentValue(rawValue, mapOverride) {
+    if (rawValue == null) {
+      return rawValue;
+    }
+    const lookup = mapOverride || argsMap;
+    const normalized = normalizeArgKey(rawValue);
+    if (lookup && typeof lookup.has === "function" && lookup.has(normalized)) {
+      return lookup.get(normalized);
+    }
+    return normalized;
+  }
+
   function queueBlocks(blockElems) {
     //gets blocks, puts in queue (array) and/or map depending on procedure or not
     let blockStack = [];
+    let fallbackStack = [];
     procedureMap = new Map(); //reset global map
     for (let index = 0; index < blockElems.length; index++) {
       const element = blockElems[index];
@@ -1880,23 +2969,404 @@
         let nestedBlocks = element.getElementsByTagName("block");
         index += nestedBlocks.length;
       } else {
-        //all other block types
-        // add as 'next' in queue
-        blockStack.push(element);
+        // Record blocks that belong to the main program starting at the start block
+        if (type === "robControls_start") {
+          const startStatement = findStatementElement(element, "ST");
+          blockStack = blockStack.concat(
+            collectBlocksFromStatement(startStatement)
+          );
+        }
+        fallbackStack.push(element);
       }
     }
+    if (blockStack.length === 0) {
+      // Fallback to previous behaviour if no start block chain was found
+      blockStack = fallbackStack;
+    }
     return blockStack;
+  }
+
+  function findFirstChildElement(parent, tagName) {
+    if (!parent || !parent.childNodes) {
+      return null;
+    }
+    const normalized = tagName ? tagName.toLowerCase() : null;
+    for (let i = 0; i < parent.childNodes.length; i++) {
+      const child = parent.childNodes[i];
+      if (
+        child &&
+        child.nodeType === 1 &&
+        child.tagName &&
+        (!normalized || child.tagName.toLowerCase() === normalized)
+      ) {
+        return child;
+      }
+    }
+    return null;
+  }
+
+  function getDirectChildElements(parent, tagName) {
+    if (!parent || !parent.childNodes) {
+      return [];
+    }
+    const matches = [];
+    const normalized = tagName ? tagName.toLowerCase() : null;
+    for (let i = 0; i < parent.childNodes.length; i++) {
+      const child = parent.childNodes[i];
+      if (
+        child &&
+        child.nodeType === 1 &&
+        child.tagName &&
+        (!normalized || child.tagName.toLowerCase() === normalized)
+      ) {
+        matches.push(child);
+      }
+    }
+    return matches;
+  }
+
+  function getFirstChildBlock(parent) {
+    const blocks = getDirectChildElements(parent, "block");
+    return blocks.length ? blocks[0] : null;
+  }
+
+  function getNextBlockElement(blockElement) {
+    const nextNode = findFirstChildElement(blockElement, "next");
+    if (!nextNode) {
+      return null;
+    }
+    return getFirstChildBlock(nextNode);
+  }
+
+  function findValueElement(blockElement, name) {
+    const values = getDirectChildElements(blockElement, "value");
+    return values.find(
+      (v) => (v.getAttribute && v.getAttribute("name")) === name
+    );
+  }
+
+  function findStatementElement(blockElement, name) {
+    const statements = getDirectChildElements(blockElement, "statement");
+    return statements.find(
+      (s) => (s.getAttribute && s.getAttribute("name")) === name
+    );
+  }
+
+  function collectBlocksFromStatement(statementElement) {
+    const sequence = [];
+    if (!statementElement) {
+      return sequence;
+    }
+    let current = getFirstChildBlock(statementElement);
+    while (current) {
+      sequence.push(current);
+      current = getNextBlockElement(current);
+    }
+    return sequence;
+  }
+
+  function trimOrNull(text) {
+    if (text == null) {
+      return null;
+    }
+    const trimmed = String(text).trim();
+    return trimmed.length ? trimmed : null;
+  }
+
+  function extractLiteralFromValueNode(valueElement) {
+    if (!valueElement) {
+      return null;
+    }
+
+    if (typeof valueElement.getElementsByTagName === "function") {
+      const fieldNodes = valueElement.getElementsByTagName("field");
+      if (fieldNodes && fieldNodes.length) {
+        for (let i = 0; i < fieldNodes.length; i++) {
+          const field = fieldNodes[i];
+          const text = field && trimOrNull(field.textContent);
+          if (text != null) {
+            return text;
+          }
+        }
+      }
+
+      const mutationNodes = valueElement.getElementsByTagName("mutation");
+      if (mutationNodes && mutationNodes.length) {
+        for (let i = 0; i < mutationNodes.length; i++) {
+          const attrValue = trimOrNull(mutationNodes[i]?.getAttribute("value"));
+          if (attrValue != null) {
+            return attrValue;
+          }
+        }
+      }
+    }
+
+    const fallback = trimOrNull(valueElement.textContent);
+    if (fallback != null) {
+      return fallback;
+    }
+
+    return null;
+  }
+
+  function getFieldValue(element, fieldName) {
+    if (!element) {
+      return null;
+    }
+    const fields = element.getElementsByTagName("field");
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
+      if ((field.getAttribute && field.getAttribute("name")) === fieldName) {
+        return trimOrNull(field.textContent);
+      }
+    }
+    return null;
+  }
+
+  async function evaluateValueBlock(apiUrl, valueElement) {
+    if (!valueElement) {
+      return null;
+    }
+    const block = getFirstChildBlock(valueElement);
+    if (block) {
+      return await evaluateBlockElement(apiUrl, block);
+    }
+    const literal = extractLiteralFromValueNode(valueElement);
+    if (literal == null) {
+      return null;
+    }
+    const numeric = Number(literal);
+    return isNaN(numeric) ? literal : numeric;
+  }
+
+  function toNumber(value) {
+    if (typeof value === "number") {
+      return value;
+    }
+    const numeric = Number(value);
+    return isNaN(numeric) ? 0 : numeric;
+  }
+
+  function toBoolean(value) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") {
+        return true;
+      }
+      if (normalized === "false") {
+        return false;
+      }
+    }
+    return !!value;
+  }
+
+  async function evaluateBlockElement(apiUrl, blockElement) {
+    if (!blockElement) {
+      return null;
+    }
+    const type = blockElement.getAttribute("type");
+    switch (type) {
+      case "logic_boolean": {
+        const field = getFieldValue(blockElement, "BOOL") || "FALSE";
+        return field.toUpperCase() === "TRUE";
+      }
+      case "logic_negate": {
+        const inner = await evaluateValueBlock(
+          apiUrl,
+          findValueElement(blockElement, "BOOL")
+        );
+        return !toBoolean(inner);
+      }
+      case "logic_operation": {
+        const op = (getFieldValue(blockElement, "OP") || "AND").toUpperCase();
+        const a = await evaluateValueBlock(
+          apiUrl,
+          findValueElement(blockElement, "A")
+        );
+        const b = await evaluateValueBlock(
+          apiUrl,
+          findValueElement(blockElement, "B")
+        );
+        if (op === "AND") {
+          return toBoolean(a) && toBoolean(b);
+        }
+        return toBoolean(a) || toBoolean(b);
+      }
+      case "logic_compare": {
+        const op = (getFieldValue(blockElement, "OP") || "EQ").toUpperCase();
+        const a = await evaluateValueBlock(
+          apiUrl,
+          findValueElement(blockElement, "A")
+        );
+        const b = await evaluateValueBlock(
+          apiUrl,
+          findValueElement(blockElement, "B")
+        );
+        switch (op) {
+          case "EQ":
+            return a == b; // eslint-disable-line eqeqeq
+          case "NEQ":
+            return a != b; // eslint-disable-line eqeqeq
+          case "LT":
+            return toNumber(a) < toNumber(b);
+          case "LTE":
+            return toNumber(a) <= toNumber(b);
+          case "GT":
+            return toNumber(a) > toNumber(b);
+          case "GTE":
+            return toNumber(a) >= toNumber(b);
+          default:
+            return false;
+        }
+      }
+      case "math_number": {
+        const value = getFieldValue(blockElement, "NUM");
+        return toNumber(value);
+      }
+      case "text": {
+        return getFieldValue(blockElement, "TEXT") || "";
+      }
+      case "naoSensors_bagIsFull": {
+        const result = await getCall(apiUrl + "/bag_full");
+        if (
+          result &&
+          typeof result === "object" &&
+          result.bag_is_full != null
+        ) {
+          return !!result.bag_is_full;
+        }
+        return false;
+      }
+      case "naoSensors_solutionReady": {
+        const result = await getCall(apiUrl + "/solution_ready");
+        if (
+          result &&
+          typeof result === "object" &&
+          result.solution_ready != null
+        ) {
+          return !!result.solution_ready;
+        }
+        return false;
+      }
+      default: {
+        const literal = extractLiteralFromValueNode(blockElement);
+        if (literal != null) {
+          return literal;
+        }
+      }
+    }
+    return null;
+  }
+
+  function buildProcedureCallArgMap(callElement, previousArgsMap) {
+    const mutationNode = findFirstChildElement(callElement, "mutation");
+    const argNodes = mutationNode
+      ? getDirectChildElements(mutationNode, "arg")
+      : [];
+    const valueLookup = Object.create(null);
+    const valueChildren = getDirectChildElements(callElement, "value");
+
+    valueChildren.forEach((valueElement) => {
+      const nameAttr =
+        (valueElement.getAttribute && valueElement.getAttribute("name")) || "";
+      const match = nameAttr.match(/^ARG(\d+)$/i);
+      if (match) {
+        const idx = parseInt(match[1], 10);
+        if (!isNaN(idx)) {
+          valueLookup[idx] = valueElement;
+        }
+      }
+    });
+
+    const argMap = new Map();
+
+    argNodes.forEach((argNode, argIndex) => {
+      if (!argNode || typeof argNode.getAttribute !== "function") {
+        return;
+      }
+      const paramName = normalizeArgKey(argNode.getAttribute("name"));
+      if (!paramName) {
+        return;
+      }
+      const valueElement = valueLookup[argIndex];
+      const literalValue = extractLiteralFromValueNode(valueElement);
+      if (literalValue != null) {
+        const resolvedValue = resolveArgumentValue(
+          literalValue,
+          previousArgsMap
+        );
+        argMap.set(paramName, normalizeArgKey(resolvedValue));
+      }
+    });
+
+    return argMap;
+  }
+
+  async function executeProcedureCall(apiUrl, callElement, procedureName) {
+    if (!procedureMap.has(procedureName)) {
+      return;
+    }
+
+    const previousArgsMap = argsMap;
+    try {
+      const currentArgsMap = buildProcedureCallArgMap(
+        callElement,
+        previousArgsMap
+      );
+      argsMap = currentArgsMap;
+      await blockAPICalls(apiUrl, procedureMap.get(procedureName));
+    } finally {
+      argsMap = previousArgsMap;
+    }
   }
 
   async function blockAPICalls(apiUrl, blockElements) {
     for (let index = 0; index < blockElements.length; index++) {
       const element = blockElements[index];
 
-
       let url = "";
       let obj;
       //rn everything is just GET. Maybe POST is more correct but if it works why bother
       switch (element.getAttribute("type")) {
+        case "controls_if":
+        case "robControls_if":
+        case "robControls_ifElse": {
+          const conditionValue = findValueElement(element, "IF0");
+          const shouldRun = await evaluateValueBlock(apiUrl, conditionValue);
+          if (toBoolean(shouldRun)) {
+            const doStatement = findStatementElement(element, "DO0");
+            const doBlocks = collectBlocksFromStatement(doStatement);
+            await blockAPICalls(apiUrl, doBlocks);
+          } else {
+            const elseStatement = findStatementElement(element, "ELSE");
+            if (elseStatement) {
+              const elseBlocks = collectBlocksFromStatement(elseStatement);
+              await blockAPICalls(apiUrl, elseBlocks);
+            }
+          }
+          continue;
+        }
+        case "controls_repeat_ext":
+        case "controls_repeat":
+        case "robControls_repeat": {
+          let timesBlock = findValueElement(element, "TIMES");
+          let iterations = await evaluateValueBlock(apiUrl, timesBlock);
+          if (iterations == null) {
+            iterations = toNumber(getFieldValue(element, "TIMES"));
+          }
+          iterations = Math.max(0, Math.floor(toNumber(iterations)));
+          const bodyStatement =
+            findStatementElement(element, "DO") ||
+            findStatementElement(element, "DO0");
+          const bodyBlocks = collectBlocksFromStatement(bodyStatement);
+          for (let i = 0; i < iterations; i++) {
+            await blockAPICalls(apiUrl, bodyBlocks);
+          }
+          continue;
+        }
         case "naoActions_moveToPosition":
           //The values we want to get are nested like:
           // value, block, field, text.nodeValue (each being a xml element)
@@ -1905,30 +3375,33 @@
             element.childNodes[0].childNodes[0].childNodes[0].childNodes[0]
               .nodeValue;
 
-          //if found value is a parameter, get the value in map. Otherwise it's a number, and we use that
-          let x = argsMap.has(val) ? argsMap.get(val) : val;
+          let x = resolveArgumentValue(val);
           val =
             element.childNodes[1].childNodes[0].childNodes[0].childNodes[0]
               .nodeValue;
-          let y = argsMap.has(val) ? argsMap.get(val) : val;
+          let y = resolveArgumentValue(val);
           val =
             element.childNodes[2].childNodes[0].childNodes[0].childNodes[0]
               .nodeValue;
-          let z = argsMap.has(val) ? argsMap.get(val) : val;
+          let z = resolveArgumentValue(val);
 
           url = apiUrl + "/move_pos/" + x + "/" + y + "/" + z;
 
           await getCall(url);
           continue;
         case "naoActions_moveToObject":
-          obj = element.childNodes[0].childNodes[0].nodeValue;
+          obj = resolveArgumentValue(
+            element.childNodes[0].childNodes[0].nodeValue
+          );
           url = apiUrl + "/move_obj/" + obj;
           await getCall(url);
           continue;
         case "naoActions_pickObject":
           //pickObject has field <field name="OBJECT">RED_OBJECT</field>
           //to get the actual value of the field, we must access the child's child
-          obj = element.childNodes[0].childNodes[0].nodeValue;
+          obj = resolveArgumentValue(
+            element.childNodes[0].childNodes[0].nodeValue
+          );
           url = apiUrl + "/pick_obj/" + obj;
           await getCall(url);
           continue;
@@ -1940,42 +3413,40 @@
           url = apiUrl + "/release";
           await getCall(url);
           continue;
+        case "naoActions_mixSolution":
+          url = apiUrl + "/mix_solution";
+          await getCall(url);
+          continue;
+        case "naoActions_analyzeSolution":
+          url = apiUrl + "/analyze_solution";
+          await getCall(url);
+          continue;
         case "robControls_wait_time": //using OpenRoberta's pre-defined wait block - see WaitTimeStmt.java
           let seconds =
             element.childNodes[0].childNodes[0].childNodes[0].childNodes[0]
               .nodeValue;
+          seconds = resolveArgumentValue(seconds);
           url = apiUrl + "/wait/" + seconds;
           await getCall(url);
           continue;
-        case "robProcedures_callnoreturn": //still need to handle OG define function feature
-          let procedureName = element.childNodes[0].getAttribute("name");
-          console.info("procedure found: ", procedureName);
-          // Call the corresponding procedure in procedureMap
-          if (procedureMap.has(procedureName)) {
-            //call function recursively, to make api calls for all blocks in procedure
-            await blockAPICalls(apiUrl, procedureMap.get(procedureName));
-          }
+        case "naoActions_moveUp":
+          // Field-based block: <field name="DZ">10</field>
+          let dzVal = element.childNodes[0].childNodes[0].nodeValue;
+          dzVal = resolveArgumentValue(dzVal);
+          // API expects centimeters integer
+          url = apiUrl + "/move_up/" + Math.round(Number(dzVal));
+          await getCall(url);
           continue;
-        case "customProcedures_callnoreturn": //NOTICE - it's _CALLnoreturn, not _DEFnoreturn
-          procedureName = element.childNodes[0].getAttribute("name");
-          console.info("procedure found: ", procedureName);
-          // Call the corresponding procedure in procedureMap
-          if (procedureMap.has(procedureName)) {
-            //if called with parameters, save those in map
-            let args = element.childNodes[0].childNodes;
-
-            for (let index = 0; index < args.length; index++) {
-              const arg = args[index];
-              //get the actual value
-              //value( child block (child field (child text)))
-              let value =
-                element.childNodes[2 + index].childNodes[0].childNodes[0]
-                  .childNodes[0].nodeValue;
-              argsMap.set(arg.getAttribute("name"), value);
-              //console.info("got args name: ", arg.getAttribute('name'));
-              // console.info("got value: ", value);
-            }
-            await blockAPICalls(apiUrl, procedureMap.get(procedureName));
+        case "naoActions_getResultInLaptop":
+          url = apiUrl + "/laptop_result";
+          await getCall(url);
+          continue;
+        case "robProcedures_callnoreturn":
+        case "customProcedures_callnoreturn":
+          {
+            const procedureName = element.childNodes[0].getAttribute("name");
+            console.info("procedure found: ", procedureName);
+            await executeProcedureCall(apiUrl, element, procedureName);
           }
           continue;
       }
@@ -2001,7 +3472,7 @@
         return `Error from Python: ${data.error}`;
       }
 
-      return data.result;
+      return data;
     } catch (error) {
       return `An error occurred: ${error}`;
     }
@@ -2053,6 +3524,18 @@
         ? highlightOnlyFunctionCandidates
         : null,
     initRunBrick: typeof initRunBrick !== "undefined" ? initRunBrick : null,
+    revealDefinitionWorkspacePane:
+      typeof revealDefinitionWorkspacePane !== "undefined"
+        ? revealDefinitionWorkspacePane
+        : null,
+    collapseDefinitionWorkspacePane:
+      typeof collapseDefinitionWorkspacePane !== "undefined"
+        ? collapseDefinitionWorkspacePane
+        : null,
+    setupDefinitionWorkspaceToggleButton:
+      typeof setupDefinitionWorkspaceToggleButton !== "undefined"
+        ? setupDefinitionWorkspaceToggleButton
+        : null,
   };
 });
 /*

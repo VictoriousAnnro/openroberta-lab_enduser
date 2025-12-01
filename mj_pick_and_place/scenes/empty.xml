@@ -1,23 +1,155 @@
-<mujoco model="empty">
+<mujoco model="empty_scene">
     <compiler angle="radian" meshdir="assets" autolimits="true"/>
     <option timestep="0.001" gravity="0 0 -9.81" integrator="implicitfast"
-            viscosity="0.1" iterations="50" ls_iterations="10" cone="pyramidal"/>
+            viscosity="0.1" iterations="80" ls_iterations="40" cone="pyramidal" density="1000"/>
 
     <visual>
-        <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3"/>
-        <global azimuth="120" elevation="-20"/>
+        <quality shadowsize="4096"/>
+        <headlight diffuse="0.7 0.7 0.7" ambient="0.25 0.25 0.25"/>
+        <global azimuth="135" elevation="-25"/>
     </visual>
 
     <asset>
-        <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
-        <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4"
-                 rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300"/>
-        <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+        <texture type="skybox" builtin="gradient" rgb1="0.25 0.35 0.6" rgb2="0 0 0.05" width="800" height="800"/>
+        <texture type="2d" name="lab_floor_tex" builtin="checker" mark="edge"
+                 rgb1="0.16 0.18 0.22" rgb2="0.10 0.11 0.14" markrgb="0.55 0.55 0.55" width="512" height="512"/>
+        <texture type="2d" name="table_tex" builtin="flat" rgb1="0.78 0.78 0.8" width="256" height="256"/>
+        <texture type="2d" name="matte_plastic" builtin="flat" rgb1="0.55 0.55 0.58" width="256" height="256"/>
+        <!-- Screen result textures (generated at runtime if missing) -->
+        
+        <!-- Mesh for laptop screen (front face has UVs so the texture maps correctly) -->
+       
+        <material name="lab_floor" texture="lab_floor_tex" texrepeat="6 6" texuniform="true" reflectance="0.25"/>
+        <material name="table_top_mat" texture="table_tex" shininess="0.35" reflectance="0.15"/>
+        <material name="trim_dark" rgba="0.15 0.15 0.18 1" shininess="0.05"/>
+        <material name="glass_mat" rgba="0.85 0.93 1 0.35" shininess="1.0" reflectance="0.4"/>
+        <material name="bag_mat" rgba="0.94 0.94 0.9 0.65" shininess="0.15"/>
+        <material name="metal_mat" rgba="0.55 0.55 0.58 1" shininess="0.9" reflectance="0.35"/>
+        <material name="holder_mat" texture="matte_plastic" shininess="0.25" reflectance="0.1"/>
+        <material name="screen_glow" rgba="0.2 0.4 0.8 0.9" emission="0.6" shininess="0.3"/>
+       
+        <!-- Material used for the geometry checkmark (bright, emissive green) -->
+        <material name="check_mat" rgba="0.08 0.85 0.12 1" emission="2.0" shininess="0.2"/>
+        <material name="laptop_shell" rgba="0.18 0.18 0.2 1" shininess="0.6"/>
+        <material name="label_mat" rgba="1 1 1 0.95"/>
     </asset>
 
     <worldbody>
-        <light pos="0 0 2" dir="0 0 -1" directional="true"/>
-        <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+        <light name="key_light" pos="0.5 -0.5 2" dir="-0.2 0.2 -1" directional="true" castshadow="true" cutoff="60"/>
+        <light name="fill_light" pos="-0.4 0.4 2.2" dir="0.2 -0.2 -1" directional="true" diffuse="0.4 0.4 0.5" specular="0.2 0.2 0.3"/>
+        <geom name="lab_floor" type="plane" size="0 0 0.1" material="lab_floor" friction="1 0.1 0.01"/>
+        <camera name="overview" mode="fixed" pos="1.2 -1.4 1.35" euler="0.4 0 0.8" fovy="50"/>
+
+        <!-- Table and recessed bag slot -->
+        <body name="table_top" pos="0 0 0.5">
+            <geom name="table_surface" type="box" size="0.8 0.6 0.01" material="table_top_mat" friction="1.5 0.01 0.0001"/>
+            <geom name="table_edge" type="box" size="0.82 0.62 0.004" pos="0 0 -0.014" material="trim_dark" contype="0" conaffinity="0"/>
+            <body name="bag_table_slot" pos="-0.4 0.3 0">
+                <geom name="slot_inner" type="box" pos="0 0 -0.006" size="0.22 0.18 0.006" rgba="0.23 0.23 0.23 1" contype="0" conaffinity="0"/>
+                <geom name="slot_border" type="box" pos="0 0 -0.002" size="0.24 0.2 0.002" rgba="0.55 0.55 0.55 1" contype="0" conaffinity="0"/>
+                <geom name="slot_open" type="box" pos="0 0 0.0005" size="0.205 0.165 0.0005" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0"/>
+            </body>
+        </body>
+
+        <!-- Mixing station with beaker -->
+        <body name="mix_station" pos="0.18 0.55 0.51">
+            <geom name="mix_plate" type="cylinder" size="0.07 0.005" rgba="0.35 0.36 0.4 1" friction="1.2 0.01 0.0001"/>
+            <geom name="mix_plate_trim" type="cylinder" size="0.075 0.008" rgba="0.15 0.15 0.18 1" contype="0" conaffinity="0"/>
+            <geom name="mix_led" type="cylinder" pos="0.05 -0.04 0.01" size="0.01 0.001" rgba="0.2 0.8 0.6 1" contype="0" conaffinity="0"/>
+            <body name="mix_beaker" pos="0 0 0.06">
+                <geom name="mix_beaker_glass" type="cylinder" size="0.035 0.06" material="glass_mat" contype="0" conaffinity="0"/>
+                <geom name="mix_beaker_fluid" type="cylinder" pos="0 0 -0.015" size="0.028 0.03" rgba="0.85 0.3 0.2 0.7" contype="0" conaffinity="0"/>
+                <geom name="mix_beaker_lip" type="cylinder" pos="0 0 0.06" size="0.038 0.004" rgba="0.95 0.95 0.95 0.8" contype="0" conaffinity="0"/>
+            </body>
+        </body>
+
+        <!-- Analysis pad / scale -->
+        <body name="analysis_pad" pos="0.35 -0.22 0.51">
+            <geom name="analysis_base" type="box" size="0.09 0.07 0.008" rgba="0.3 0.32 0.36 1" friction="1.3 0.01 0.0001"/>
+            <geom name="analysis_plate" type="box" pos="0 0 0.01" size="0.08 0.06 0.004" rgba="0.78 0.78 0.82 1" contype="0" conaffinity="0"/>
+            <geom name="analysis_display" type="box" pos="0.0 0.055 0.02" size="0.045 0.01 0.005" material="screen_glow" contype="0" conaffinity="0"/>
+            <geom name="analysis_button" type="cylinder" pos="0.06 -0.05 0.012" size="0.008 0.003" rgba="0.85 0.3 0.2 1" contype="0" conaffinity="0"/>
+        </body>
+
+        <!-- Tedlar bag recess -->
+        <body name="tedlar_bag_zone" pos="-0.4 0.3 0.49">
+            <geom name="bag_base" type="box" pos="0 0 0.01" size="0.17 0.13 0.01" rgba="0.85 0.83 0.78 0.95" contype="0" conaffinity="0"/>
+            <geom name="bag_back" type="box" pos="0 -0.13 0.045" size="0.17 0.004 0.045" material="bag_mat" contype="0" conaffinity="0"/>
+            <geom name="bag_front" type="box" pos="0 0.13 0.045" size="0.17 0.004 0.045" material="bag_mat" contype="0" conaffinity="0"/>
+            <geom name="bag_left" type="box" pos="-0.17 0 0.045" size="0.004 0.13 0.045" material="bag_mat" contype="0" conaffinity="0"/>
+            <geom name="bag_right" type="box" pos="0.17 0 0.045" size="0.004 0.13 0.045" material="bag_mat" contype="0" conaffinity="0"/>
+            <geom name="bag_inner_shadow" type="box" pos="0 0 0.045" size="0.155 0.115 0.035" rgba="0.2 0.2 0.2 0.15" contype="0" conaffinity="0"/>
+            <geom name="bag_rim_front" type="box" pos="0 0.13 0.09" size="0.17 0.003 0.003" rgba="0.98 0.98 0.96 0.85" contype="0" conaffinity="0"/>
+            <geom name="bag_rim_back" type="box" pos="0 -0.13 0.09" size="0.17 0.003 0.003" rgba="0.98 0.98 0.96 0.85" contype="0" conaffinity="0"/>
+            <geom name="bag_rim_left" type="box" pos="-0.17 0 0.09" size="0.003 0.13 0.003" rgba="0.98 0.98 0.96 0.85" contype="0" conaffinity="0"/>
+            <geom name="bag_rim_right" type="box" pos="0.17 0 0.09" size="0.003 0.13 0.003" rgba="0.98 0.98 0.96 0.85" contype="0" conaffinity="0"/>
+            <geom name="bag_nozzle" type="cylinder" pos="0.18 0 0.04" size="0.012 0.04" euler="0 1.57 0" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0"/>
+            <geom name="bag_label" type="box" pos="0 0.145 0.05" size="0.1 0.005 0.015" material="label_mat" contype="0" conaffinity="0"/>
+            <!-- Individual bag slots for placed chemistry objects -->
+            <body name="bag_slot_nitrogen" pos="-0.06 -0.04 0.03">
+                <geom name="bag_slot_nitrogen_geom" type="sphere" size="0.015" rgba="0.8 0.2 0.2 0.9" contype="0" conaffinity="0"/>
+            </body>
+            <body name="bag_slot_chloroform" pos="0.06 -0.04 0.03">
+                <geom name="bag_slot_chloroform_geom" type="sphere" size="0.015" rgba="0.2 0.3 0.8 0.9" contype="0" conaffinity="0"/>
+            </body>
+            <body name="bag_slot_toluene" pos="0.00 0.00 0.03">
+                <geom name="bag_slot_toluene_geom" type="sphere" size="0.015" rgba="0.6 0.2 0.6 0.9" contype="0" conaffinity="0"/>
+            </body>
+        </body>
+
+        <!-- Nitrogen bottle (red) -->
+        <body name="nitrogen_tool" pos="0.1 0.3 0.55">
+            <geom name="n_col" type="box" size="0.022 0.022 0.035" rgba="1 0 0 0" mass="0.05" friction="2 0.005 0.0001"/>
+            <geom name="n_glass" type="cylinder" size="0.018 0.03" material="glass_mat" contype="0" conaffinity="0"/>
+            <geom name="n_liq" type="cylinder" size="0.014 0.025" rgba="0.8 0 0 1" contype="0" conaffinity="0"/>
+            <geom name="n_cap" type="cylinder" pos="0 0 0.03" size="0.018 0.006" rgba="0.1 0.1 0.1 1" contype="0" conaffinity="0"/>
+            <freejoint/>
+        </body>
+
+        <!-- Chloroform syringe (blue) -->
+        <body name="chloroform_syringe" pos="0.3 0.2 0.55">
+            <geom name="c_col" type="box" size="0.018 0.018 0.045" rgba="0 0 1 0" mass="0.02" friction="2 0.005 0.0001"/>
+            <geom name="c_vis_body" type="cylinder" size="0.01 0.04" rgba="0.8 0.8 1 0.5" contype="0" conaffinity="0"/>
+            <geom name="c_vis_liq" type="cylinder" pos="0 0 -0.012" size="0.008 0.025" rgba="0 0 1 1" contype="0" conaffinity="0"/>
+            <geom name="c_vis_plunge" type="box" pos="0 0 0.055" size="0.014 0.0025 0.0025" rgba="1 1 1 1" contype="0" conaffinity="0"/>
+            <geom name="c_vis_needle" type="cylinder" pos="0 0 -0.055" size="0.0012 0.012" rgba="0.5 0.5 0.5 1" contype="0" conaffinity="0"/>
+            <freejoint/>
+        </body>
+
+        <!-- Small toluene vial (dark red) -->
+        <body name="toluene_syringe" pos="0.2 0.3 0.55">
+            <geom name="t_col" type="box" size="0.018 0.018 0.03" rgba="0.5 0 0 0" mass="0.02" friction="2 0.005 0.0001"/>
+            <geom name="t_vis" type="cylinder" size="0.014 0.025" material="glass_mat" contype="0" conaffinity="0"/>
+            <geom name="t_liq" type="cylinder" size="0.012 0.02" rgba="0.5 0 0 1" contype="0" conaffinity="0"/>
+            <geom name="t_cap" type="cylinder" pos="0 0 0.025" size="0.015 0.006" rgba="1 1 1 1" contype="0" conaffinity="0"/>
+            <freejoint/>
+        </body>
+
+        <!-- Laptop workstation for solution readout -->
+        <body name="lab_laptop" pos="0.68 -0.42 0.51" euler="0 0 0.35">
+            <geom name="laptop_base" type="box" size="0.13 0.09 0.006" material="laptop_shell" friction="1 0.005 0.0001"/>
+            <geom name="laptop_keyboard" type="box" pos="0 0.015 0.008" size="0.12 0.08 0.002" rgba="0.13 0.13 0.16 1" contype="0" conaffinity="0"/>
+            <geom name="laptop_hinge" type="capsule" pos="0 0.09 0.012" size="0.004 0.06" euler="0 1.57 0" material="metal_mat" contype="0" conaffinity="0"/>
+            <body name="laptop_screen_body" pos="0 0.11 0.08" euler="-0.32 0 0">
+                <geom name="laptop_screen_frame" type="box" size="0.12 0.006 0.085" material="laptop_shell" contype="0" conaffinity="0"/>
+                
+                 <!-- The dark screen background -->
+                <geom name="lab_laptop_screen" type="box" pos="0 0.001 0" size="0.108 0.001 0.075" rgba="0.05 0.08 0.12 1" material="screen_glow" contype="0" conaffinity="0"/>
+
+                 <!-- Checkmark made from capsule geoms. Two logical geoms and two visible
+                     counterparts slightly in front of the screen to avoid Z-fighting. These
+                     are toggled by the simulation code (pnp._set_check_visibility). -->
+                 <!-- Move check geoms further toward the viewer (negative local Y) so they render in front -->
+                 <geom name="check_short" type="capsule" fromto="-0.03 -0.01 -0.01 -0.005 -0.01 -0.03" size="0.006" contype="0" conaffinity="0"/>
+                 <geom name="check_long" type="capsule" fromto="-0.005 -0.01 -0.03 0.04 -0.01 0.02" size="0.006" contype="0" conaffinity="0"/>
+                 <!-- Visible geoms: further forward and using check_mat for immediate visibility -->
+                 <geom name="check_short_vis" type="capsule" fromto="-0.03 -0.02 -0.01 -0.005 -0.02 -0.03" size="0.007" contype="0" conaffinity="0" material="check_mat"/>
+                 <geom name="check_long_vis" type="capsule" fromto="-0.005 -0.02 -0.03 0.04 -0.02 0.02" size="0.007" contype="0" conaffinity="0" material="check_mat"/>
+                 <!-- Extra guaranteed-visible plane slightly in front of the screen surface -->
+                 <!--<geom name="check_plane_vis" type="box" pos="0 -0.025 0" size="0.05 0.001 0.035" material="check_mat" contype="0" conaffinity="0"/>-->
+
+                </body> <!-- close laptop_screen_body -->
+            </body> <!-- close lab_laptop -->
     </worldbody>
 
 </mujoco>

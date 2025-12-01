@@ -1,5 +1,6 @@
 from collections import deque
 from pathlib import Path
+from typing import Optional
 import glfw
 import mujoco as mj
 import mujoco
@@ -11,217 +12,436 @@ from spatialmath import SE3
 
 _HERE = Path(__file__).parent.parent
 
+LAPTOP_SCREEN_IDLE_RGBA = np.array([0.05, 0.08, 0.12, 1.0])
+LAPTOP_SCREEN_ACTIVE_RGBA = np.array([0.15, 0.85, 0.95, 1.0])
+laptop_screen_geom_id: Optional[int] = None
+laptop_screen_mat_id: Optional[int] = None
+
+# Geom ids for checkmark strokes (and visible fallbacks)
+check_short_gid: Optional[int] = None
+check_long_gid: Optional[int] = None
+check_short_vis_gid: Optional[int] = None
+check_long_vis_gid: Optional[int] = None
+
+WHITE_RGBA = np.array([0.0, 1.0, 0.0, 1.0])  # changed to green RGBA
+
+
+def set_laptop_screen(display_solution: bool) -> bool:
+    """Toggle laptop monitor color to indicate whether a solution is shown."""
+    global laptop_screen_geom_id, laptop_screen_mat_id
+    if laptop_screen_geom_id is None or laptop_screen_geom_id < 0:
+        try:
+            laptop_screen_geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "lab_laptop_screen")
+        except Exception:
+            laptop_screen_geom_id = -1
+    if laptop_screen_geom_id is None or laptop_screen_geom_id < 0:
+        return False
+
+    target = WHITE_RGBA if display_solution else LAPTOP_SCREEN_IDLE_RGBA
+    
+    # Try material id first
+    if laptop_screen_mat_id is None or laptop_screen_mat_id < 0:
+        try:
+            laptop_screen_mat_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_MATERIAL, "screen_glow")
+        except Exception:
+            laptop_screen_mat_id = -1
+
+    # If displaying a solution, try to attach the runtime-generated
+    # texture asset (screen_success.png / screen_fail.png) to the
+    # material so the laptop shows the image rather than a flat color.
+    if display_solution:
+        try:
+            # Texture names are defined in the scene XML (created by init/ensure)
+            tex_name = 'screen_success_tex'
+            texid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_TEXTURE, tex_name)
+        except Exception:
+            texid = -1
+        if texid is not None and texid >= 0 and laptop_screen_mat_id is not None and laptop_screen_mat_id >= 0:
+            try:
+                # Assign texture id to material (bindings differ across mujoco versions)
+                try:
+                    model.mat_texid[laptop_screen_mat_id] = int(texid)
+                except Exception:
+                    try:
+                        model.material_texid[laptop_screen_mat_id] = int(texid)
+                    except Exception:
+                        pass
+                # Ensure the geom uses this material
+                try:
+                    model.geom_matid[laptop_screen_geom_id] = int(laptop_screen_mat_id)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    if laptop_screen_mat_id is not None and laptop_screen_mat_id >= 0:
+        try:
+            model.mat_rgba[laptop_screen_mat_id] = target
+        except Exception:
+            try:
+                model.material_rgba[laptop_screen_mat_id] = target
+            except Exception:
+                pass
+
+    # Fallback to geom rgba
+    try:
+        model.geom_rgba[laptop_screen_geom_id] = target
+        model.geom_rgba[laptop_screen_geom_id][0] = target[0]
+    except Exception:
+        pass
+
+    # Toggle check-geometry visibility to match the screen state
+    try:
+        _set_check_visibility(bool(display_solution))
+    except Exception:
+        pass
+
+    # Debug: print resolved ids and target color
+    try:
+        print(f"set_laptop_screen called: geom_id={laptop_screen_geom_id} mat_id={laptop_screen_mat_id} target={target}", flush=True)
+    except Exception:
+        pass
+
+        
+
+        
+
+
+def _init_check_handles():
+    """Resolve and initialize check-geom ids and hide them by default."""
+    global check_short_gid, check_long_gid, check_short_vis_gid, check_long_vis_gid
+    try:
+        check_short_gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "check_short")
+    except Exception:
+        check_short_gid = -1
+    try:
+        check_long_gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "check_long")
+    except Exception:
+        check_long_gid = -1
+    try:
+        check_short_vis_gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "check_short_vis")
+    except Exception:
+        check_short_vis_gid = -1
+    try:
+        check_long_vis_gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "check_long_vis")
+    except Exception:
+        check_long_vis_gid = -1
+
+    # Debug: log resolved geom ids
+    try:
+        print(f"_init_check_handles: check_short={check_short_gid} check_long={check_long_gid} check_short_vis={check_short_vis_gid} check_long_vis={check_long_vis_gid}", flush=True)
+    except Exception:
+        pass
+    # Hide all check geoms initially (alpha = 0)
+    try:
+        for gid in (check_short_gid, check_long_gid, check_short_vis_gid, check_long_vis_gid):
+            if gid is None:
+                continue
+            try:
+                if gid >= 0:
+                    model.geom_rgba[gid] = np.array([0.0, 0.0, 0.0, 0.0])
+                    if hasattr(model, 'geom_emission'):
+                        model.geom_emission[gid] = 0.0
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _set_check_visibility(success: bool):
+    """Show or hide the check geoms. If success=True, make them bright green; otherwise hide them."""
+    global check_short_gid, check_long_gid, check_short_vis_gid, check_long_vis_gid
+    # Ensure handles exist
+    try:
+        if (check_short_gid is None) or (check_long_gid is None) or (check_short_vis_gid is None) or (check_long_vis_gid is None):
+            _init_check_handles()
+    except Exception:
+        try:
+            _init_check_handles()
+        except Exception:
+            pass
+
+    try:
+        if success:
+            col = np.array([0.08, 0.85, 0.12, 1.0])
+            emis = 2.0
+        else:
+            col = np.array([0.0, 0.0, 0.0, 0.0])
+            emis = 0.0
+
+        for gid in (check_short_gid, check_long_gid, check_short_vis_gid, check_long_vis_gid):
+            try:
+                if gid is None or gid < 0:
+                    continue
+                model.geom_rgba[gid] = col
+                if hasattr(model, 'geom_emission'):
+                    model.geom_emission[gid] = emis
+            except Exception:
+                pass
+
+        try:
+            mj.mj_forward(model, data)
+        except Exception:
+            pass
+
+        # attempt viewer sync
+        try:
+            import mj_pick_and_place.robot_api as _robot_api
+            rinst = getattr(_robot_api, 'robot', None)
+            if rinst is not None and getattr(rinst, 'viewer', None) is not None:
+                try:
+                    rinst.viewer.sync()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def ensure_screen_textures():
+    """Ensure texture image assets for laptop success/fail exist.
+
+    This function will create two PNG files under the scene `assets/`
+    directory (`screen_success.png` and `screen_fail.png`) if they are
+    not already present. Images are generated using Pillow (PIL). If
+    Pillow is not installed, this is a no-op and the caller should
+    continue — the scene will fall back to color-only display.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        return
+
+    assets_dir = (_HERE / "scenes" / "assets")
+    try:
+        assets_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    def make_image(path: Path, text: str, bg: tuple, fg=(255, 255, 255)):
+        if path.exists():
+            return
+        try:
+            # Create a square image for the screen texture
+            w, h = 512, 512
+            img = Image.new("RGBA", (w, h), bg + (255,))
+            draw = ImageDraw.Draw(img)
+
+            # If text is 'SUCCESS' we draw a green check graphic centered on the image.
+            if str(text).upper().strip() == "SUCCESS":
+                # Check parameters
+                check_color = (24, 200, 80, 255)  # vivid green
+                thickness = int(w * 0.08)
+
+                # Points for a typical check shape (relative coordinates)
+                p1 = (int(w * 0.18), int(h * 0.55))
+                p2 = (int(w * 0.40), int(h * 0.72))
+                p3 = (int(w * 0.82), int(h * 0.22))
+
+                # Draw thick lines for the two legs
+                try:
+                    draw.line([p1, p2], fill=check_color, width=thickness)
+                    draw.line([p2, p3], fill=check_color, width=thickness)
+                except Exception:
+                    # Older PIL may not support width parameter; draw multiple offset lines
+                    for off in range(-thickness//2, thickness//2 + 1):
+                        draw.line([(p1[0], p1[1]+off), (p2[0], p2[1]+off)], fill=check_color)
+                        draw.line([(p2[0], p2[1]+off), (p3[0], p3[1]+off)], fill=check_color)
+
+                # Add circular caps for smooth ends
+                r = thickness // 2
+                draw.ellipse([p1[0]-r, p1[1]-r, p1[0]+r, p1[1]+r], fill=check_color)
+                draw.ellipse([p2[0]-r, p2[1]-r, p2[0]+r, p2[1]+r], fill=check_color)
+                draw.ellipse([p3[0]-r, p3[1]-r, p3[0]+r, p3[1]+r], fill=check_color)
+            else:
+                # Default: render centered text
+                try:
+                    font = ImageFont.truetype("arial.ttf", 96)
+                except Exception:
+                    font = ImageFont.load_default()
+                text = str(text)
+                tw, th = draw.textsize(text, font=font)
+                draw.text(((w - tw) / 2, (h - th) / 2), text, font=font, fill=fg + (255,))
+
+            img.save(path.as_posix())
+        except Exception:
+            try:
+                # Fallback tiny image
+                img = Image.new("RGBA", (64, 32), bg + (255,))
+                img.save(path.as_posix())
+            except Exception:
+                pass
+
+    make_image(assets_dir / "screen_success.png", "SUCCESS", (0, 90, 60))
+    make_image(assets_dir / "screen_fail.png", "FAIL", (70, 10, 10))
+
+
 def init() -> tuple[mj.MjModel, mj.MjData]:
     """
     Initialize the MuJoCo simulation environment.
-    
+
     Creates a scene with:
     - UR5e robot arm mounted at z=0.5m
     - Robotiq 2F-85 gripper attached to the arm
-    - Red or blue box object (target to pick)
-    - Drop bucket (target location)
-    - Table surface
-    
-    Returns:
-        tuple: (MuJoCo model, MuJoCo data) : these are the compiled simulation model and its data
-    """
-    # Load empty scene as base
-    spec = mj.MjSpec().from_file((_HERE / "scenes/empty.xml").as_posix())
 
-    # Load robot arm and gripper descriptions
+    Returns:
+        tuple: (MuJoCo model, MuJoCo data)
+    """
+    # Ensure the images used for runtime laptop text exist before loading the scene
+    try:
+        ensure_screen_textures()
+    except Exception:
+        pass
+
+    # Load the decorated scene and robot assets
+    spec = mj.MjSpec().from_file((_HERE / "scenes/empty.xml").as_posix())
     arm = mj.MjSpec().from_file(ur5e_mj_description.MJCF_PATH)
     gripper = mj.MjSpec().from_file(robotiq_2f85_mj_description.MJCF_PATH)
 
-    # Attach robot arm to world at height 0.5m with prefix "robot/"
-    spec.worldbody.add_frame(pos=[0,0,0.5]).attach_body(arm.worldbody.first_body(), prefix="robot/")
-    
-    # Add red box (pickable object)
-    # Position: [0.3m, 0.3m, 0.52m] :placed on the table
+    # Mount robot arm at 0.5 m height
+    spec.worldbody.add_frame(pos=[0, 0, 0.5]).attach_body(arm.worldbody.first_body(), prefix="robot/")
 
-    # ---  MATERIALS (For better visuals) ---
-    # Transparent glass
-    spec.add_material(name="glass_mat", rgba=[0.8, 0.9, 1.0, 0.3], shininess=0.9, reflectance=0.5)
-    # Plastic bag
-    spec.add_material(name="bag_mat", rgba=[0.9, 0.9, 0.8, 0.6], shininess=0.2)
-    # Metal
-    spec.add_material(name="metal_mat", rgba=[0.6, 0.6, 0.6, 1.0], shininess=0.8)
-
-
-# --- A. NITROGEN BOTTLE (Red) ---
-    # Position: Left
-    body = spec.worldbody.add_body(name="nitrogen_tool", pos=[0.3, 0.3, 0.55])
-    
-    # 1. THE PHYSICAL TRICK: A transparent/invisible box that the robot grabs
-    body.add_geom(name="n_col", type=mj.mjtGeom.mjGEOM_BOX, 
-                  size=[0.018, 0.018, 0.03], 
-                  rgba=[1, 0, 0, 0],       
-                  mass=0.05, friction=[2.0, 0.005, 0.0001]) 
-    
-
-    # 2. THE VISUAL: The nice bottle (No mass, just decoration)
-    # Outer glass
-    body.add_geom(name="n_glass", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  size=[0.015, 0.025, 0], material="glass_mat", 
-                  contype=0, conaffinity=0) 
-    # Red liquid inside
-    body.add_geom(name="n_liq", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  size=[0.012, 0.02, 0], rgba=[0.8, 0, 0, 1], 
-                  contype=0, conaffinity=0)
-    # Black cap
-    body.add_geom(name="n_cap", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0,0,0.025], size=[0.016, 0.005, 0], rgba=[0.1, 0.1, 0.1, 1],
-                  contype=0, conaffinity=0)
-    
-    body.add_freejoint()
-
-# --- B. CHLOROFORM SYRINGE (Blue) ---
-    # Position: Center
-    body = spec.worldbody.add_body(name="chloroform_syringe", pos=[0.3, 0.2, 0.55])
-    
-    # 1. PHYSICS: Grasp box
-    body.add_geom(name="c_col", type=mj.mjtGeom.mjGEOM_BOX, 
-                  size=[0.015, 0.015, 0.04], 
-                  rgba=[0, 0, 1, 0], 
-                  mass=0.02, friction=[2.0, 0.005, 0.0001])
-    
-
-    # 2. VISUAL: Syringe
-    # Main body
-    body.add_geom(name="c_vis_body", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  size=[0.008, 0.035, 0], rgba=[0.8, 0.8, 1, 0.5], contype=0, conaffinity=0)
-    # Blue liquid
-    body.add_geom(name="c_vis_liq", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0,0,-0.01], size=[0.006, 0.02, 0], rgba=[0, 0, 1, 1], contype=0, conaffinity=0)
-    # Plunger (top)
-    body.add_geom(name="c_vis_plunge", type=mj.mjtGeom.mjGEOM_BOX, 
-                  pos=[0,0,0.045], size=[0.012, 0.002, 0.002], rgba=[1, 1, 1, 1], contype=0, conaffinity=0)
-    # Needle (top)
-    body.add_geom(name="c_vis_needle", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0,0,-0.045], size=[0.001, 0.01, 0], rgba=[0.5, 0.5, 0.5, 1], contype=0, conaffinity=0)
-                  
-    body.add_freejoint()
-
-# --- C. SMALL TOLUENE VIAL (Dark Red) ---
-    # Position: Right
-    body = spec.worldbody.add_body(name="toluene_syringe", pos=[0.3, 0.1, 0.55])
-    
-    # 1. PHYSICS
-    body.add_geom(name="t_col", type=mj.mjtGeom.mjGEOM_BOX, 
-                  size=[0.015, 0.015, 0.025], 
-                  rgba=[0.5, 0, 0, 0], 
-                  mass=0.02, friction=[2.0, 0.005, 0.0001])
-    
-    # 2. VISUAL (Small vial like Eppendorf or sample)
-    body.add_geom(name="t_vis", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  size=[0.012, 0.02, 0], material="glass_mat", contype=0, conaffinity=0)
-    body.add_geom(name="t_liq", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  size=[0.01, 0.015, 0], rgba=[0.5, 0, 0, 1], contype=0, conaffinity=0)
-    body.add_geom(name="t_cap", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0,0,0.02], size=[0.013, 0.005, 0], rgba=[1, 1, 1, 1], contype=0, conaffinity=0)
-                  
-    body.add_freejoint()    
-
-
-
-    # ---------------------------------------------------------
-    # 2. FIXED OBJECTS (Scenery)
-    # ---------------------------------------------------------
-
-# --- D. TEDLAR BAG (Target) ---
-    # Position: Left of Table
-    body = spec.worldbody.add_body(name="tedlar_bag_zone", pos=[-0.4, 0.3, 0.505]) # Muy cerca de la mesa
-    
-    # Bag body (Flattened)
-    body.add_geom(name="bag_body", type=mj.mjtGeom.mjGEOM_BOX, 
-                  size=[0.12, 0.10, 0.01], material="bag_mat")
-    # Bag nozzle (Black cylinder)
-    body.add_geom(name="bag_nozzle", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0.1, 0, 0.01], size=[0.01, 0.03, 0], 
-                  rgba=[0.1, 0.1, 0.1, 1], euler=[0, 1.57, 0]) # Rotated horizontal
-    # Visual label
-    body.add_geom(name="bag_label", type=mj.mjtGeom.mjGEOM_BOX, 
-                  pos=[0, 0, 0.011], size=[0.04, 0.03, 0.001], rgba=[1, 1, 1, 1])
-    
-
-
-# --- E. AIR VALVE (Fixed) ---
-    # Position: Front of Table
-    pos_valvula = [-0.3, -0.2, 0.55] 
-    body = spec.worldbody.add_body(name="air_valve", pos=pos_valvula)
-    
-    # Base Pipe (Gray)
-    body.add_geom(name="valve_pipe", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  size=[0.015, 0.04, 0], material="metal_mat")
-    # Rotating Handle (Green box - to indicate it's a valve)
-    body.add_geom(name="valve_handle", type=mj.mjtGeom.mjGEOM_BOX, 
-                  pos=[0, 0, 0.05], size=[0.04, 0.01, 0.005], rgba=[0, 0.8, 0, 1])
-    # Central Bolt
-    body.add_geom(name="valve_bolt", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0, 0, 0.055], size=[0.008, 0.005, 0], rgba=[0.2, 0.2, 0.2, 1])
-    
-
-# --- F. LAPTOP  ---
-    # Position: Rear right corner of the table
-    pos_laptop = [0.5, -0.3, 0.51]
-    body = spec.worldbody.add_body(name="lab_laptop", pos=pos_laptop, euler=[0, 0, 0.5]) # Rotated a bit
-    
-    # Base of the keyboard (Dark gray)
-    body.add_geom(name="lap_base", type=mj.mjtGeom.mjGEOM_BOX, 
-                  size=[0.12, 0.09, 0.005], rgba=[0.2, 0.2, 0.2, 1])
-    # Screen (Opened approximately 90 degrees)
-    body.add_geom(name="lap_screen", type=mj.mjtGeom.mjGEOM_BOX, 
-                  pos=[0, 0.09, 0.08], size=[0.12, 0.005, 0.08], 
-                  rgba=[0.1, 0.1, 0.1, 1], euler=[-0.3, 0, 0]) # Tilted backward
-    # Screen "light" (Soft blue)
-    body.add_geom(name="lap_display", type=mj.mjtGeom.mjGEOM_BOX, 
-                  pos=[0, 0.086, 0.08], size=[0.11, 0.001, 0.07], 
-                  rgba=[0.2, 0.4, 0.8, 0.8], euler=[-0.3, 0, 0], 
-                  material="glass_mat") # Using your glass material to make it shine
-    
-
-# --- G. RACK WITH TUBE (Decoration) ---
-    
-    pos_rack = [0.70, -0.15, 0.52]
-    body = spec.worldbody.add_body(name="test_tube_rack", pos=pos_rack)
-    
-    # Base of the rack (Wood/Orange)
-    body.add_geom(name="rack_base", type=mj.mjtGeom.mjGEOM_BOX, 
-                  size=[0.03, 0.10, 0.02], rgba=[0.6, 0.4, 0.2, 1])
-    
-    # Decorative test tubes (Fixed)
-    # Tube 1
-    body.add_geom(name="tube_1", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0, -0.06, 0.04], size=[0.008, 0.05, 0], material="glass_mat")
-    body.add_geom(name="liq_1", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0, -0.06, 0.02], size=[0.006, 0.03, 0], rgba=[1, 1, 0, 1]) # Yellow
-    # Tube 2
-    body.add_geom(name="tube_2", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0, 0.0, 0.04], size=[0.008, 0.05, 0], material="glass_mat")
-    body.add_geom(name="liq_2", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0, 0.0, 0.03], size=[0.006, 0.04, 0], rgba=[0, 1, 1, 1]) # Cyan
-    # Tube 3
-    body.add_geom(name="tube_3", type=mj.mjtGeom.mjGEOM_CYLINDER, 
-                  pos=[0, 0.06, 0.04], size=[0.008, 0.05, 0], material="glass_mat")
-
-
-
-# --- H. TABLE SURFACE ---
-    # Add table surface (static object)
-    box_body = spec.worldbody.add_body(name="table_top", pos=[0.0, 0.0, 0.5])
-    box_body.add_geom(name="table_top", type=mj.mjtGeom.mjGEOM_BOX, 
-                     size=[0.8, 0.6, 0.01], rgba=[0.8, 0.8, 0.8, 1])
-
-    # Find the attachment site on the robot arm and attach gripper
+    # Attach gripper to arm
     s: mj.MjsSite = arm.worldbody.find_all(mj.mjtObj.mjOBJ_SITE)[0]
     s.attach_body(gripper.worldbody.first_body(), prefix="gripper/")
 
-    # Compile the model and create data structure
+    # Compile
     m = spec.compile()
     d = mj.MjData(m)
     return m, d
 
-# Initialize the simulation
+
+# Initialize the simulation model and data so other helpers can use them
 model, data = init()
+
+
+def show_solution_on_laptop():
+    # Prefer the textured 'SUCCESS' display so the screen shows readable white text.
+    try:
+        return show_text_on_laptop("SUCCESS")
+    except Exception:
+        return set_laptop_screen(True)
+
+
+def clear_laptop_solution_display():
+    # Restore default appearance (fallback to simple color/material reset)
+    try:
+        _set_check_visibility(False)
+    except Exception:
+        pass
+    return set_laptop_screen(False)
+
+
+def show_text_on_laptop(text: str) -> bool:
+    # Minimal reliable implementation: set laptop screen to green on success
+    if text is None:
+        return False
+
+    t = str(text).strip().upper()
+    success = t == "SUCCESS" or t == "OK"
+
+    # Ensure handles are initialized
+    if laptop_screen_geom_id is None or laptop_screen_geom_id < 0:
+        _init_visual_handles()
+
+    try:
+        # Best-effort: acquire RobotAPI lock and viewer instance for atomic update
+        lock = None
+        robot_inst = None
+        try:
+            import mj_pick_and_place.robot_api as _robot_api
+            robot_inst = getattr(_robot_api, 'robot', None)
+            lock = getattr(robot_inst, 'data_lock', None)
+        except Exception:
+            lock = None
+
+        gid = laptop_screen_geom_id if (laptop_screen_geom_id is not None) else -1
+        if gid is None or gid < 0:
+            return False
+
+        # Green color used elsewhere in this module
+        green = np.array([0.08, 0.85, 0.12, 1.0])
+        target = green if success else LAPTOP_SCREEN_IDLE_RGBA
+
+        try:
+            if lock is not None:
+                try:
+                    lock.acquire()
+                except Exception:
+                    pass
+            # Directly set geom rgba and emission (best-effort)
+            try:
+                model.geom_rgba[gid] = target
+            except Exception:
+                pass
+            try:
+                model.geom_emission[gid] = 1.5 if success else 0.0
+            except Exception:
+                pass
+        finally:
+            try:
+                if lock is not None:
+                    lock.release()
+            except Exception:
+                pass
+
+        # Push forward kinematics and try to sync viewer so change is visible
+        try:
+            mj.mj_forward(model, data)
+        except Exception:
+            pass
+        try:
+            if robot_inst is not None and getattr(robot_inst, 'viewer', None) is not None:
+                try:
+                    robot_inst.viewer.sync()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return True
+    except Exception as e:
+        print(f"show_text_on_laptop failed: {e}", flush=True)
+        return False
+
+
+def clear_laptop_text():
+    try:
+        # Restore default appearance
+        clear_laptop_solution_display()
+        return True
+    except Exception:
+        return False
+
+
+def _init_visual_handles():
+    """Resolve geom and material ids used for runtime visual state toggles."""
+    global laptop_screen_geom_id
+    global laptop_screen_mat_id
+    try:
+        laptop_screen_geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "lab_laptop_screen")
+    except Exception:
+        laptop_screen_geom_id = -1
+    try:
+        laptop_screen_mat_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_MATERIAL, "screen_glow")
+    except Exception:
+        laptop_screen_mat_id = -1
+
+    # Debug: log visual handle ids
+    try:
+        print(f"_init_visual_handles: laptop_screen_geom_id={laptop_screen_geom_id} laptop_screen_mat_id={laptop_screen_mat_id}", flush=True)
+    except Exception:
+        pass
+
+
+_init_visual_handles()
+_init_check_handles()
+try:
+    _set_check_visibility(False)
+except Exception:
+    pass
+clear_laptop_solution_display()
 
 # Robot configuration
 # Home position: joints at specific angles (in radians) for "home" pose
@@ -267,14 +487,9 @@ def get_joints():
     return np.array([data.joint(name).qpos[0] for name in joint_names])
 
 def set_actuators(positions):
-    """
-    Command the robot actuators to move to target joint positions.
-    
-    Note: This only sets commands to target positions : the robot doesn't move.
-    
-    Args:
-        positions: Array of 6 target joint angles (in radians)
-    """
+    """Command the robot actuators to move to target joint positions."""
+    # Note: This only sets commands to target angles; MuJoCo won't step the robot here.
+
     for i, name in enumerate(actuator_names):
         act_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, name)
         data.ctrl[act_id] = positions[i]
@@ -385,8 +600,37 @@ def get_body_pos(name):
     """
     mj.mj_forward(model, data)  # Update forward kinematics
     body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, name)
-    body_pos = data.body(body_id).xpos.copy()
+    try:
+        body_pos = data.body(body_id).xpos.copy()
+    except Exception:
+        body_pos = np.array([0.0, 0.0, 0.0])
+    
     return body_pos
+
+
+def set_body_pos(name, pos):
+    """Move a body (teleport) to a new world-space position.
+
+    This is a best-effort teleport used for dropping objects into the bag zone
+    to avoid them staying glued to the robot or blocking future motions.
+    """
+    try:
+        body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, name)
+        if body_id < 0:
+            return False
+        # Write directly into data.xpos for the body and forward kinematics
+        data.xpos[body_id, :] = np.array(pos, dtype=float)
+        # Zero velocities for safety
+        if data.qvel is not None:
+            # best-effort: zero any floating joint velocities by setting qvel entries to 0
+            try:
+                # This is coarse; only set a slice equal to length of qvel
+                data.qvel[:] = 0
+            except Exception:
+                pass
+        mj.mj_forward(model, data)
+    except Exception:
+        return False
 
 def set_gripper(position):
     """
@@ -572,3 +816,22 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+"""
+ # --- G. RACK WITH TUBES ---
+    pos_rack = [0.70, -0.15, 0.52]
+    body = spec.worldbody.add_body(name="test_tube_rack", pos=pos_rack)
+    body.add_geom(name="rack_base", type=mj.mjtGeom.mjGEOM_BOX, size=[0.03, 0.10, 0.02],
+                  rgba=[0.6, 0.4, 0.2, 1])
+    body.add_geom(name="tube_1", type=mj.mjtGeom.mjGEOM_CYLINDER, pos=[0, -0.06, 0.04],
+                  size=[0.008, 0.05, 0], material="glass_mat")
+    body.add_geom(name="liq_1", type=mj.mjtGeom.mjGEOM_CYLINDER, pos=[0, -0.06, 0.02],
+                  size=[0.006, 0.03, 0], rgba=[1, 1, 0, 1])
+    body.add_geom(name="tube_2", type=mj.mjtGeom.mjGEOM_CYLINDER, pos=[0, 0.0, 0.04],
+                  size=[0.008, 0.05, 0], material="glass_mat")
+    body.add_geom(name="liq_2", type=mj.mjtGeom.mjGEOM_CYLINDER, pos=[0, 0.0, 0.03],
+                  size=[0.006, 0.04, 0], rgba=[0, 1, 1, 1])
+    body.add_geom(name="tube_3", type=mj.mjtGeom.mjGEOM_CYLINDER, pos=[0, 0.06, 0.04],
+                  size=[0.008, 0.05, 0], material="glass_mat")
+"""

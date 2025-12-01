@@ -1,0 +1,29 @@
+mtllib laptop_screen.mtl
+
+# vertices (v): front quad then back quad
+v -0.105000 0.001500 -0.072000
+v 0.105000 0.001500 -0.072000
+v 0.105000 0.001500 0.072000
+v -0.105000 0.001500 0.072000
+v -0.105000 -0.001500 -0.072000
+v 0.105000 -0.001500 -0.072000
+v 0.105000 -0.001500 0.072000
+v -0.105000 -0.001500 0.072000
+
+# texture coords (vt) - front face uses full 0..1 range
+vt 0.000000 0.000000
+vt 1.000000 0.000000
+vt 1.000000 1.000000
+vt 0.000000 1.000000
+
+# normals (vn)
+vn 0.0 1.0 0.0
+vn 0.0 -1.0 0.0
+
+usemtl screen_mat
+# front face (winding order so normal points outwards)
+f 1/1/1 2/2/1 3/3/1 4/4/1
+# back face
+f 8/1/2 7/2/2 6/3/2 5/4/2
+
+# Note: thin mesh; edges are omitted but front face is sufficient for texturing

@@ -97,7 +97,7 @@ import sys
 from pathlib import Path
 import numpy as np
 from collections import deque
-import mujoco
+import mujoco as mj
 import mujoco.viewer
 import threading
 
@@ -141,7 +141,99 @@ class RobotAPI:
         self.viewer_running = False # Flag to control viewer thread
 
         # Thread safety to protect the mjData object from simultaneous access
-        self.data_lock = threading.Lock() 
+        self.data_lock = threading.Lock()
+
+        # Lightweight state tracking for experiment logic
+        self.held_object = None
+        self.pending_pick_object_name = None
+        self.bag_fill_level = 0
+        self.bag_full_threshold = 2  # number of drops before considered "full"
+            # Minimum safe Z-offset (meters) above target positions to avoid collisions
+            # Increase this value if you want the arm to travel higher above objects.
+        self.safe_height_offset = 0.20  # 20 cm safe hover by default
+        self.baggable_objects = {
+            "nitrogen_tool",
+            "chloroform_syringe",
+            "toluene_syringe",
+        }
+        # Mapping from UI slot names to scene body names inside the Tedlar bag
+        self.bag_slot_map = {
+            "nitrogen_slot": "bag_slot_nitrogen",
+            "chloroform_slot": "bag_slot_chloroform",
+            "toluene_slot": "bag_slot_toluene",
+        }
+        self.mix_station_center = np.array([0.18, 0.38, 0.51])
+        self.analysis_pad_center = np.array([0.35, -0.22, 0.51])
+        self.mixture_ready = False
+        self.analysis_ready = False
+        self.analysis_press_latched = False
+        # If a move_to_object call targeted a specific bag slot, we store it here
+        self.pending_place_slot = None
+
+    def _set_laptop_solution_display(self, show_solution: bool):
+        """Best-effort helper to toggle the MuJoCo laptop screen."""
+        try:
+            if show_solution:
+                pnp.show_solution_on_laptop()
+            else:
+                pnp.clear_laptop_solution_display()
+        except Exception:
+            pass
+
+    def _detect_analysis_press_locked(self) -> bool:
+        """Check if the wrist is pressing the analysis pad while lock is held."""
+        try:
+            pad_pose = self._get_body_position(
+                "analysis_pad", self.analysis_pad_center
+            )
+            self.analysis_pad_center = pad_pose
+            ee_pos = pnp.get_ee_mujoco()
+        except Exception:
+            return False
+
+        lateral = np.linalg.norm((ee_pos - pad_pose)[:2])
+        vertical = pad_pose[2] - ee_pos[2]
+        pressing = lateral <= 0.035 and 0 <= vertical <= 0.03
+
+        if pressing and not self.analysis_press_latched:
+            self.analysis_press_latched = True
+            return True
+        if not pressing:
+            self.analysis_press_latched = False
+        return False
+
+    def _get_body_position(self, body_name, fallback):
+        """Fetch the live pose for a body, falling back if unavailable."""
+        try:
+            return pnp.get_body_pos(body_name).copy()
+        except Exception:
+            return fallback.copy()
+
+    def get_station_pose(self, station_name):
+        """Return the current pose for a named station on the workbench."""
+        if station_name == "mix_station":
+            self.mix_station_center = self._get_body_position(
+                "mix_station", self.mix_station_center
+            )
+            return self.mix_station_center.copy()
+        if station_name == "analysis_pad":
+            self.analysis_pad_center = self._get_body_position(
+                "analysis_pad", self.analysis_pad_center
+            )
+            return self.analysis_pad_center.copy()
+        return None
+
+    def _is_over_bag_zone(self, horizontal_tolerance=0.15, z_min=0.5, z_max=0.9):
+        """Rudimentary check whether the wrist is hovering over the Tedlar bag opening."""
+        try:
+            bag_pos = pnp.get_body_pos("tedlar_bag_zone")
+            ee_pos = pnp.get_ee_mujoco()
+        except Exception:
+            return False
+
+        horizontal_dist = np.linalg.norm((ee_pos - bag_pos)[:2])
+        within_height = z_min <= ee_pos[2] <= z_max
+        return horizontal_dist <= horizontal_tolerance and within_height
 
     def launch_viewer(self):
         """
@@ -228,12 +320,15 @@ class RobotAPI:
             robot.initialize()  # Robot moves to home position
         """
         #We set the joints to home configuration
-        for i, jn in enumerate(pnp.joint_names):
-            self.data.joint(jn).qpos = pnp.home_qpos[i]  
-            self.data.actuator(pnp.actuator_names[i]).ctrl = pnp.home_qpos[i]  #MOtors
+        with self.data_lock:
+            for i, jn in enumerate(pnp.joint_names):
+                self.data.joint(jn).qpos = pnp.home_qpos[i]
+                self.data.actuator(pnp.actuator_names[i]).ctrl = pnp.home_qpos[i]
+            pnp.open_gripper()
+            self.mixture_ready = False
+            self.analysis_ready = False
 
-        #We open the gripper
-        pnp.open_gripper()
+        self._set_laptop_solution_display(False)
 
         return {"status": "success", "message": "Robot initialized"}
 
@@ -302,7 +397,7 @@ class RobotAPI:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    def move_to_object(self, object_name, height_offset=0.05):
+    def move_to_object(self, object_name, height_offset=0.12):
         """
         Move the robot end-effector above an object with an offset.
         This is useful for picking an object.The robot will move to a position directly 
@@ -326,13 +421,22 @@ class RobotAPI:
         """
         try:
             with self.data_lock:
-                #Current position of the object from simulation
-                obj_pos = pnp.get_body_pos(object_name)  # Returns [x, y, z]
+                # Resolve bag-slot aliases (UI names -> scene body names)
+                body_name = self.bag_slot_map.get(object_name, object_name)
 
-                # Target position: above the object
-                target_pos = obj_pos + np.array([0, 0, height_offset])
+                # Current position of the object from simulation
+                obj_pos = pnp.get_body_pos(body_name)  # Returns [x, y, z]
 
-                #Ccurrent joint configuration of the robot
+                # Choose height offset: explicit param takes precedence, otherwise use safe default
+                if height_offset is None:
+                    h = self.safe_height_offset
+                else:
+                    h = float(height_offset)
+
+                # Target position: above the object (apply safe height)
+                target_pos = obj_pos + np.array([0, 0, h])
+
+                #Current joint configuration of the robot
                 current_q = pnp.get_joints()
 
                 #We plan a  trajectory to target
@@ -349,6 +453,13 @@ class RobotAPI:
 
             #Store the trajectory for execution
             self.current_trajectory = traj
+            # If the user selected a bag slot alias, remember it so release()
+            # can place the object into the exact slot instead of using the
+            # generic bag drop distribution.
+            if object_name in self.bag_slot_map:
+                self.pending_place_slot = self.bag_slot_map[object_name]
+            else:
+                self.pending_place_slot = None
 
             return {"status": "success", "message": f"Moving to {object_name}"}
 
@@ -356,6 +467,33 @@ class RobotAPI:
             #Handle errors (e.g., object_name doesn't exist)
             return {"status": "error", "message": str(e)}
 
+    def move_by_z(self, dz):
+        """
+        Move the end-effector vertically by dz meters (relative move in Z).
+        Positive dz moves up, negative moves down. The planner will be
+        invoked to move the arm to the new cartesian position.
+        """
+        try:
+            with self.data_lock:
+                ee = pnp.get_ee_mujoco()
+                target = np.array([ee[0], ee[1], ee[2] + float(dz)])
+                # Enforce minimum safe height
+                if target[2] < self.safe_height_offset:
+                    target[2] = self.safe_height_offset
+
+                # Plan movement to target
+                current_q = pnp.get_joints()
+                target_q, traj = pnp.plan_trajectory_from_config(
+                    current_q, target, 1.5
+                )
+
+                if target_q is None:
+                    return {"status": "error", "message": "Cannot reach target height"}
+
+                self.current_trajectory = traj
+                return {"status": "success", "message": f"Moving by dz={dz}m"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
     def pick_object(self, object_name):
         """
         Execute a complete pick sequence for an object.
@@ -396,7 +534,8 @@ class RobotAPI:
             with self.data_lock:
                 #Get  the positionof the object 
                 obj_pos = pnp.get_body_pos(object_name)
-                height_above = 0.05  #5cm
+                height_above = 0.12  # default hover after pick (matches move_to_object)
+                grasp_offset = 0.02  # stop slightly above the object to avoid collision
 
                 #End-effector position
                 current_ee_pos = pnp.get_ee_mujoco()
@@ -418,9 +557,10 @@ class RobotAPI:
 
                 #FROm here, the robot is in a correct position, we plan pick the sequence
                 current_q = pnp.get_joints()
-
-                #Phase 1: move down to the object furing 1 second
-                q1, traj1 = pnp.plan_trajectory_from_config(current_q, obj_pos, 1.0)
+                #Phase 1: move down only to a small grasp offset (avoid hitting the object)
+                q1, traj1 = pnp.plan_trajectory_from_config(
+                    current_q, obj_pos + np.array([0.0, 0.0, grasp_offset]), 1.0
+                )
 
                 if q1 is None:
                     return {
@@ -428,21 +568,37 @@ class RobotAPI:
                         "message": f"Cannot plan descent to {object_name}"
                     }
 
-                # Phase 2: move up the  object 
-                #Start from q1 (the previous position of the robot)
+                # Phase 2: move up the object
+                # Start from q1 (the previous position of the robot)
+                # Use the API's safe_height_offset for the post-grasp lift
+                lift_height = max(height_above, self.safe_height_offset)
                 q2, traj2 = pnp.plan_trajectory_from_config(
-                    q1, obj_pos + np.array([0, 0, height_above]), 1.0
+                    q1, obj_pos + np.array([0, 0, lift_height]), 1.0
                 )
 
-            # Combine the trajectories with the gripper command 
-            #This creates the sequence: move down -> grasp -> move up 
+                # Combine the trajectories with the gripper command
+            # This creates the sequence: move down -> grasp -> hold -> move up
             combined = deque()
-            combined.extend(traj1)#move down trajectory
-            combined.append({'action': 'close_gripper'}) 
-            combined.extend(traj2)#move up trajectory
+            combined.extend(traj1)  # move down trajectory
+            # Close gripper at the end of the descent
+            combined.append({'action': 'close_gripper'})
+
+            # Insert a short hold (repeat the last waypoint) to allow the gripper to close and physics to settle
+            try:
+                # traj1 is a deque of joint arrays; take the last configuration
+                last_q = traj1[-1]
+                hold_time = 0.2  # seconds
+                hold_steps = max(1, int(hold_time / pnp.model.opt.timestep))
+                for _ in range(hold_steps):
+                    combined.append(last_q)
+            except Exception:
+                pass
+
+            combined.extend(traj2)  # move up trajectory
 
             #Store  the combined trajectory
             self.current_trajectory = combined
+            self.pending_pick_object_name = object_name
 
             return {"status": "success", "message": f"Picking {object_name}"}
 
@@ -484,8 +640,78 @@ class RobotAPI:
 
 
         with self.data_lock:
+            dropped_object = self.held_object
+            over_bag = self._is_over_bag_zone()
             pnp.open_gripper()  # Sets gripper actuator to open position
-        return {"status": "success", "message": "Gripper opened"}
+
+            # If we released a baggable object over the bag, place it into the
+            # explicitly targeted bag slot if one was selected; otherwise fall
+            # back to the previous grid-distribution behaviour. This prevents
+            # the robot from re-using the same last-drop position when a slot
+            # was chosen from the UI.
+            if over_bag and dropped_object in self.baggable_objects:
+                try:
+                    if self.pending_place_slot:
+                        # Place at the chosen slot body's position
+                        slot_pos = pnp.get_body_pos(self.pending_place_slot)
+                        # small upward offset so object is not inside table
+                        drop_pos = slot_pos + np.array([0.0, 0.0, 0.015])
+                        pnp.set_body_pos(dropped_object, drop_pos)
+                        # clear pending slot after placement
+                        self.pending_place_slot = None
+                    else:
+                        bag_pos = pnp.get_body_pos("tedlar_bag_zone")
+                        # Cycle through a small grid of offsets to avoid perfect stacking
+                        offsets = np.array([
+                            [0.0, 0.0],
+                            [0.02, 0.0],
+                            [-0.02, 0.0],
+                            [0.0, 0.02],
+                            [0.0, -0.02],
+                            [0.02, 0.02],
+                            [-0.02, -0.02],
+                        ])
+                        idx = self.bag_fill_level if isinstance(self.bag_fill_level, int) else 0
+                        choice = offsets[idx % len(offsets)]
+                        height_layers = idx // len(offsets)
+                        drop_z = 0.02 + 0.01 * height_layers
+                        drop_pos = bag_pos + np.array([choice[0], choice[1], drop_z])
+                        pnp.set_body_pos(dropped_object, drop_pos)
+                except Exception:
+                    pass
+
+                self.bag_fill_level = min(
+                    self.bag_fill_level + 1, self.bag_full_threshold
+                )
+                self.mixture_ready = False
+                self.analysis_ready = False
+
+            # After releasing, move the gripper to a safe hover to avoid immediate collisions
+            try:
+                # compute a safe hover above current gripper position
+                ee = pnp.get_ee_mujoco()
+                safe_hover = ee + np.array([0.0, 0.0, self.safe_height_offset])
+                # plan a short trajectory away (1.0s)
+                cur_q = pnp.get_joints()
+                q_goal, traj = pnp.plan_trajectory_from_config(cur_q, safe_hover, 0.8)
+                if q_goal is not None and traj is not None:
+                    # if no current trajectory, set this as next; otherwise append
+                    if not self.current_trajectory:
+                        self.current_trajectory = traj
+                    else:
+                        self.current_trajectory.extend(traj)
+            except Exception:
+                pass
+
+            self.held_object = None
+            self.pending_pick_object_name = None
+
+            return {
+                "status": "success",
+                "message": "Gripper opened",
+                "bag_fill_level": self.bag_fill_level,
+                "bag_is_full": self.bag_fill_level >= self.bag_full_threshold,
+            }
 
     def wait(self, seconds):
         """
@@ -505,11 +731,95 @@ class RobotAPI:
         time.sleep(float(seconds))
         return {"status": "success", "message": f"Waited {seconds}s"}
 
+    def bag_is_full(self):
+        """Return the current fill state of the Tedlar bag."""
+        with self.data_lock:
+            is_full = self.bag_fill_level >= self.bag_full_threshold
+            return {
+                "status": "success",
+                "bag_is_full": is_full,
+                "bag_fill_level": self.bag_fill_level,
+                "bag_capacity": self.bag_full_threshold,
+            }
+
+    def solution_state(self):
+        """Return flags representing the chemistry workflow readiness."""
+        with self.data_lock:
+            return {
+                "status": "success",
+                "mixture_ready": self.mixture_ready,
+                "analysis_ready": self.analysis_ready,
+                "solution_ready": self.analysis_ready,
+            }
+
+    def mark_solution_mixed(self):
+        with self.data_lock:
+            self.mixture_ready = True
+            self.analysis_ready = False
+            self.analysis_press_latched = False
+        self._set_laptop_solution_display(False)
+
+    def mark_analysis_complete(self):
+        with self.data_lock:
+            self.analysis_ready = True
+            self.mixture_ready = False
+            self.analysis_press_latched = False
+        # Primary flow: use existing pnp helper to show the solution
+        self._set_laptop_solution_display(True)
+
+        # Simple, minimal: set the screen geom directly to green and forward+sync
+        try:
+            model = pnp.model
+            data = pnp.data
+            # Prefer the cached id from pnp if available
+            gid = getattr(pnp, 'laptop_screen_geom_id', None)
+            if gid is None or gid < 0:
+                try:
+                    gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, 'lab_laptop_screen')
+                except Exception:
+                    gid = -1
+
+            if gid is not None and gid >= 0:
+                green = np.array([0.08, 0.85, 0.12, 1.0])
+                try:
+                    model.geom_rgba[gid] = green
+                except Exception:
+                    pass
+                try:
+                    model.geom_emission[gid] = 1.5
+                except Exception:
+                    pass
+
+                try:
+                    mj.mj_forward(model, data)
+                except Exception:
+                    pass
+
+                # Trigger viewer sync if present so the change is visible immediately
+                try:
+                    if self.viewer is not None:
+                        try:
+                            self.viewer.sync()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            else:
+                print("[debug] mark_analysis_complete: lab_laptop_screen geom id not found", flush=True)
+        except Exception as e:
+            print(f"[debug] mark_analysis_complete exception: {e}", flush=True)
+
+    def is_mixture_ready(self):
+        with self.data_lock:
+            return self.mixture_ready
+
+    def is_analysis_ready(self):
+        with self.data_lock:
+            return self.analysis_ready
     def get_object_position(self, object_name):
         """
         To get the current position of an object in the simulation.
         Useful for cecking if an object has moved.
-
         Args:
         object_name(str), the name of the object ("red_box", "blue_box", "drop_bucket")
 
@@ -558,6 +868,7 @@ class RobotAPI:
         Returns:
         dictionnary:Status message
         """
+        triggered_analysis_press = False
         with self.data_lock:
             #WE execute a trajectory if one exists
             if self.current_trajectory and len(self.current_trajectory) > 0:
@@ -569,15 +880,31 @@ class RobotAPI:
                     # Execute gripper action
                     if waypoint.get('action') == 'close_gripper':
                         pnp.close_gripper()
+                        if self.pending_pick_object_name:
+                            self.held_object = self.pending_pick_object_name
+                            self.pending_pick_object_name = None
                     elif waypoint.get('action') == 'open_gripper':
                         pnp.open_gripper()
+                        self.held_object = None
+                        self.pending_pick_object_name = None
                 else:
                     #IT was a normal trajectory waypoint
                     pnp.set_actuators(waypoint)
 
-            #This advances physics by one timestep
-            #MEaning it updates positions, velocities, forces, collisions, etc...
+            #Advance physics by one timestep
             mujoco.mj_step(self.model, self.data)
+
+            # If the analysis hasn't been shown yet, detect a pad press.
+            # Previously this only allowed a press to trigger when a mixture
+            # was ready. Allow the pad press to trigger the analysis flow
+            # whenever the analysis result isn't already active so the laptop
+            # will glow as soon as the robot clicks the pad.
+            if not self.analysis_ready:
+                if self._detect_analysis_press_locked():
+                    triggered_analysis_press = True
+
+        if triggered_analysis_press:
+            self.mark_analysis_complete()
 
         return {"status": "success"}
 
