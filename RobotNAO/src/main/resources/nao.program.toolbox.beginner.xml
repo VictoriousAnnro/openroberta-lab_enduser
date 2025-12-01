@@ -1,5 +1,15 @@
 <toolbox_set id="toolbox" style="display: none">
     <category name="TOOLBOX_ACTION" svg="true">
+<<<<<<< HEAD
+=======
+        <!--<block type="naoActions_move">
+            <value name="POWER">
+                <block type="math_number">
+                    <field name="NUM" min="-5" max="5" precision="1">5</field>
+                </block>
+            </value>
+        </block>-->
+>>>>>>> 0ed192ee25c0c91a6a897cf29036fd518244bac2
         <block type="naoActions_moveToPosition">
             <value name="X">
                 <block type="math_number">
