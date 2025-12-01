@@ -10,6 +10,7 @@ from pathlib import Path
 import threading
 import numpy as np
 import sys
+import os
 # Add parent directory to Python path to import sim module
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -265,21 +266,116 @@ def restart_scene():
     the new model/data.
     """
     try:
-        # Attempt to close viewer first to avoid dangling view state
+        # Debug: print incoming request headers so frontend header behavior can be observed
         try:
-            if getattr(robot, 'viewer_running', False):
-                try:
-                    robot.close_viewer()
-                except Exception:
-                    pass
+            hdrs = {k: v for k, v in request.headers.items()}
+            print(f"[app] /restart_scene headers: {hdrs}", flush=True)
         except Exception:
-            pass
-
+            print("[app] /restart_scene headers: <unavailable>", flush=True)
         # Recreate/compile the scene
         try:
             new_model, new_data = pnp.init()
+
+            # If a viewer is running, prefer an in-place reset of the existing
+            # `data` object rather than replacing model/data references. Many
+            # viewers keep strong references to the original model/data and do
+            # not accept replacements reliably; an in-place copy of arrays is
+            # more likely to be visible without closing the window.
+            try:
+                v = getattr(robot, 'viewer', None)
+                viewer_is_running = bool(getattr(robot, 'viewer_running', False)) and (v is not None)
+            except Exception:
+                v = None
+                viewer_is_running = False
+
+            if viewer_is_running:
+                try:
+                    # Try the new in-place reset helper if available
+                    if hasattr(pnp, 'reset_to_initial'):
+                        try:
+                            ok = pnp.reset_to_initial()
+                        except Exception:
+                            ok = False
+                        if ok:
+                            try:
+                                # Reinitialize visual handles and update robot refs
+                                if hasattr(pnp, '_init_visual_handles'):
+                                    try:
+                                        pnp._init_visual_handles()
+                                    except Exception:
+                                        pass
+                                if hasattr(pnp, '_init_check_handles'):
+                                    try:
+                                        pnp._init_check_handles()
+                                    except Exception:
+                                        pass
+                                robot.model = pnp.model
+                                robot.data = pnp.data
+                            except Exception:
+                                pass
+                            return {"status": "success", "message": "Scene reset in-place"}
+                except Exception:
+                    pass
+
+            # If in-place reset was not performed (no viewer or reset failed),
+            # attempt the previous hot-swap approach and fall back to restarting
+            # the viewer if needed.
+            old_model = getattr(pnp, 'model', None)
+            old_data = getattr(pnp, 'data', None)
             pnp.model = new_model
             pnp.data = new_data
+
+            try:
+                v = getattr(robot, 'viewer', None)
+                if v is not None:
+                    swapped = False
+                    # Preferred API: some viewers expose a set_model API
+                    try:
+                        if hasattr(v, 'set_model'):
+                            # set_model may accept (model, data)
+                            try:
+                                v.set_model(new_model, new_data)
+                                swapped = True
+                            except Exception:
+                                # Some variants accept only model then data separately
+                                try:
+                                    v.set_model(new_model)
+                                    v.data = new_data
+                                    swapped = True
+                                except Exception:
+                                    swapped = False
+                        else:
+                            # Try assigning model/data attributes directly
+                            try:
+                                v.model = new_model
+                                v.data = new_data
+                                swapped = True
+                            except Exception:
+                                swapped = False
+                    except Exception:
+                        swapped = False
+
+                    if swapped:
+                        try:
+                            # ensure the viewer shows the updated state immediately
+                            if hasattr(v, 'sync'):
+                                v.sync()
+                        except Exception:
+                            pass
+                    else:
+                        # Hot-swap failed — gracefully restart the viewer to pick up new model/data
+                        try:
+                            robot.close_viewer()
+                        except Exception:
+                            pass
+                        try:
+                            robot.launch_viewer()
+                        except Exception:
+                            pass
+            except Exception:
+                # Any error during viewer hot-swap is non-fatal here; leave model/data updated
+                pass
+
         except Exception as e:
             return {"status": "error", "message": f"Failed to re-init scene: {e}"}
 
@@ -307,6 +403,44 @@ def restart_scene():
 
         return {"status": "success", "message": "Scene restarted"}
 
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.route("/restart_server", methods=['GET'])
+@cross_origin()
+def restart_server():
+    """Restart the Flask API process.
+
+    This schedules an in-process execv to replace the current Python
+    process with a new one using the same argv. The request handler
+    returns immediately while the restart happens in a background
+    thread. If execv fails we fall back to exiting the process to allow
+    an external supervisor to restart it.
+    """
+    try:
+        # Debug: log incoming request headers for troubleshooting
+        try:
+            hdrs = {k: v for k, v in request.headers.items()}
+            print(f"[app] /restart_server headers: {hdrs}", flush=True)
+        except Exception:
+            print("[app] /restart_server headers: <unavailable>", flush=True)
+        def _do_restart():
+            try:
+                print("[app] Restarting server via execv...", flush=True)
+                sys.stdout.flush()
+                time.sleep(0.5)
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            except Exception as e:
+                print(f"[app] restart execv failed: {e}", flush=True)
+                try:
+                    os._exit(0)
+                except Exception:
+                    pass
+
+        t = threading.Thread(target=_do_restart, daemon=True)
+        t.start()
+        return {"status": "success", "message": "Server restart scheduled"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

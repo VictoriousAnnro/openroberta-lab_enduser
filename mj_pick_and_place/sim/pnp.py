@@ -443,6 +443,106 @@ except Exception:
     pass
 clear_laptop_solution_display()
 
+# Save a lightweight snapshot of the initial simulation state so we can
+# restore it in-place later without replacing the model/data objects the
+# viewer holds. This is useful to reset the scene while keeping the
+# viewer window open (many viewers keep strong references to the original
+# model/data objects and don't accept replacements reliably).
+_initial_data_snapshot = {}
+
+def save_initial_state():
+    """Capture copies of core arrays from `data` that are required to
+    restore the scene to its initial configuration.
+
+    This intentionally keeps the snapshot small (qpos, qvel, ctrl, time)
+    and relies on `mj_forward` to recompute derived quantities.
+    """
+    global _initial_data_snapshot
+    try:
+        snap = {}
+        try:
+            snap['qpos'] = data.qpos.copy() if data.qpos is not None else None
+        except Exception:
+            snap['qpos'] = None
+        try:
+            snap['qvel'] = data.qvel.copy() if data.qvel is not None else None
+        except Exception:
+            snap['qvel'] = None
+        try:
+            snap['ctrl'] = data.ctrl.copy() if data.ctrl is not None else None
+        except Exception:
+            snap['ctrl'] = None
+        try:
+            snap['time'] = float(getattr(data, 'time', 0.0))
+        except Exception:
+            snap['time'] = 0.0
+        _initial_data_snapshot = snap
+    except Exception:
+        _initial_data_snapshot = {}
+
+
+def reset_to_initial() -> bool:
+    """Restore the previously-saved initial state into the live `data`
+    object in-place.
+
+    Returns True on success, False otherwise. This function tries to copy
+    array contents rather than replace the `data` object so viewers that
+    hold references to the original `data` will immediately observe the
+    restored state.
+    """
+    global _initial_data_snapshot
+    if not _initial_data_snapshot:
+        return False
+    try:
+        # Restore qpos/qvel/ctrl if shapes match
+        try:
+            if _initial_data_snapshot.get('qpos') is not None and data.qpos is not None and _initial_data_snapshot['qpos'].shape == data.qpos.shape:
+                data.qpos[:] = _initial_data_snapshot['qpos']
+        except Exception:
+            pass
+        try:
+            if _initial_data_snapshot.get('qvel') is not None and data.qvel is not None and _initial_data_snapshot['qvel'].shape == data.qvel.shape:
+                data.qvel[:] = _initial_data_snapshot['qvel']
+        except Exception:
+            pass
+        try:
+            if _initial_data_snapshot.get('ctrl') is not None and data.ctrl is not None and _initial_data_snapshot['ctrl'].shape == data.ctrl.shape:
+                data.ctrl[:] = _initial_data_snapshot['ctrl']
+        except Exception:
+            pass
+
+        # Restore time and recompute derived quantities
+        try:
+            data.time = _initial_data_snapshot.get('time', 0.0)
+        except Exception:
+            pass
+        try:
+            mj.mj_forward(model, data)
+        except Exception:
+            pass
+
+        # Try to sync any active viewer so changes are visible immediately
+        try:
+            import mj_pick_and_place.robot_api as _robot_api
+            rinst = getattr(_robot_api, 'robot', None)
+            if rinst is not None and getattr(rinst, 'viewer', None) is not None:
+                try:
+                    rinst.viewer.sync()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return True
+    except Exception:
+        return False
+
+# Capture the initial state now that model/data and visual handles are set up
+try:
+    save_initial_state()
+except Exception:
+    pass
+
 # Robot configuration
 # Home position: joints at specific angles (in radians) for "home" pose
 home_qpos = [-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0]

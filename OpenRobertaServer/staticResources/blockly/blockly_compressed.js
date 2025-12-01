@@ -16216,7 +16216,8 @@ Blockly.RobControls.prototype.PATH_SIMSTEP_ =
 Blockly.RobControls.prototype.PATH_SAVEPROGRAM_ =
   "M21 13 l-.351.015c-.825-2.377-3.062-4.015-5.649-4.015-3.309 0-6 2.691-6 6l.001.126c-1.724.445-3.001 2.013-3.001 3.874 0 2.206 1.794 4 4 4 h5v-4.586 l-1.293 1.293c-.195.195-.451.293-.707.293s-.512-.098-.707-.293c-.391-.391 -.391-1.023 0-1.414l2.999-2.999c.093-.093.203-.166.326-.217.244-.101.52 -.101.764 0 .123.051.233.124.326.217l2.999 2.999c.391.391.391 1.023 0 1.414 -.195.195-.451.293-.707.293s-.512-.098-.707-.293l-1.293-1.293v4.586h4c2.757 0 5-2.243 5-5s-2.243-5-5-5z";
 Blockly.RobControls.prototype.PATH_ZOOM_ =
-  "M17 8c-3.859 0-7 3.141-7 7 0 .763.127 1.495.354 2.183l-.749.75-.511.512 -1.008 1.045c-.562.557-.891 1.345-.891 2.185 0 1.727 1.404 3.131 3.13 3.131.757 0 1.504-.278 2.104-.784l.064-.055.061-.061 1.512-1.51.75-.749 c.688.226 1.421.353 2.184.353 3.859 0 7-3.141 7-7s-3.141-7-7-7zm0 12c -2.757 0-5-2.243-5-5s2.243-5 5-5 5 2.243 5 5-2.243 5-5 5zM17 11c-2.205 0-4 1.794-4 4s1.795 4 4 4 4-1.794 4-4-1.795-4-4-4zm0 7c-1.656 0-3-1.344-3-3s 1.344-3 3-3 3 1.344 3 3-1.344 3-3 3z";
+  /* refresh / restart icon */
+  "M12 4v-3l-4 4 4 4v-3c3.31 0 6 2.69 6 6 0 1.1-.27 2.13-.76 3.03l1.5 1.5C20.58 17.57 21 15.84 21 14c0-4.97-4.03-9-9-9zm-7.66 5.34L2.92 8.92C3.7 7.38 5.28 6.3 7.07 6.06 6.6 6.7 6.32 7.42 6.32 8.18c0 3.87 3.13 7 7 7v3l4-4-4-4v3c-2.76 0-5-2.24-5-5 0-.5.07-.98.2-1.43z";
 Blockly.RobControls.prototype.PATH_ZOOMIN_ =
   "M18 16h-2v-2c0-.276-.224-.5-.5-.5s-.5.224-.5.5v2h-2c-.276 0-.5.224-.5.5 s.224.5.5.5h2v2c0 .276.224.5.5.5s.5-.224.5-.5v-2h2c.276 0 .5-.224.5-.5s -.224-.5-.5-.5zM23.432 19.97l-.536-.537-.749-.75c.227-.688.354-1.42.354 -2.183 0-3.859-3.141-7-7-7s-7 3.141-7 7 3.141 7 7 7c.763 0 1.496-.127 2.184-.354l.75.749 1.512 1.51.061.061.064.055c.601.506 1.348.784 2.104.784 1.726 0 3.13-1.404 3.13-3.131 0-.84-.328-1.628-.924-2.218l-.95-.986zm -12.932-3.47c0-2.757 2.243-5 5-5s5 2.243 5 5-2.243 5-5 5-5-2.243-5-5z";
 Blockly.RobControls.prototype.PATH_ZOOMOUT_ =
@@ -16295,7 +16296,20 @@ Blockly.RobControls.prototype.createDom = function () {
       g.preventDefault();
     });
     Blockly.bindEvent_(c, "mousedown", null, function (g) {
-      b.showZoom(!0);
+      try {
+        var restartBtn = document.getElementById("simRestart");
+        if (restartBtn) {
+          // Trigger the existing restart handler attached in index.html
+          restartBtn.click();
+        } else if (window.jQuery) {
+          // fallback: trigger via jQuery selector
+          try {
+            window.jQuery("#simRestart, #simRestartMain").trigger("click");
+          } catch (e) {}
+        }
+      } catch (e) {
+        console.error("Failed to trigger restart from zoom control", e);
+      }
       g.stopPropagation();
     });
     this.zoominSvg = d;
@@ -16329,17 +16343,57 @@ Blockly.RobControls.prototype.createButton_ = function (a, b, c, d) {
   f.tooltip = Blockly.Msg[d];
   Blockly.Tooltip.bindMouseEvents(f);
   e.appendChild(f);
-  a = Blockly.createSvgElement("path", {
-    class: "blocklyButtonPath",
-    d: a,
-    transform: "scale(1.5)",
-    "fill-rule": "evenodd",
-    "stroke-width": "0px",
-    fill: "#333",
-  });
-  a.tooltip = Blockly.Msg[d];
-  Blockly.Tooltip.bindMouseEvents(a);
-  e.appendChild(a);
+  // Create the button graphic. For the zoom/restart control we render
+  // literal text "Reset" instead of the SVG path so the UI shows the
+  // word. For all other buttons we keep the original path behavior.
+  var btnGraphic;
+  try {
+    if (a === Blockly.RobControls.prototype.PATH_ZOOM_) {
+      btnGraphic = Blockly.createSvgElement(
+        "text",
+        {
+          class: "blocklyButtonText",
+          x: "24",
+          y: "30",
+          "text-anchor": "middle",
+          "dominant-baseline": "middle",
+          "font-size": "14",
+          "font-weight": "bold",
+          fill: "#333",
+        },
+        null
+      );
+      // Insert text content
+      try {
+        btnGraphic.textContent = "Reset";
+      } catch (errText) {
+        // Fallback for older browsers
+        btnGraphic.appendChild(document.createTextNode("Reset"));
+      }
+    } else {
+      btnGraphic = Blockly.createSvgElement("path", {
+        class: "blocklyButtonPath",
+        d: a,
+        transform: "scale(1.5)",
+        "fill-rule": "evenodd",
+        "stroke-width": "0px",
+        fill: "#333",
+      });
+    }
+  } catch (err) {
+    // If anything goes wrong, fall back to creating the original path
+    btnGraphic = Blockly.createSvgElement("path", {
+      class: "blocklyButtonPath",
+      d: a,
+      transform: "scale(1.5)",
+      "fill-rule": "evenodd",
+      "stroke-width": "0px",
+      fill: "#333",
+    });
+  }
+  btnGraphic.tooltip = Blockly.Msg[d];
+  Blockly.Tooltip.bindMouseEvents(btnGraphic);
+  e.appendChild(btnGraphic);
   this.buttons.push(e);
   return e;
 };
@@ -30484,7 +30538,7 @@ Blockly.Msg.TOUR1_DESCRIPTION07a =
 Blockly.Msg.TOUR1_DESCRIPTION08 =
   "Each program starts with the \u00bbprogram start\u00ab block.<br>Further programming blocks, which the robot should execute, should be attached to this block.<br>Just drag'n drop the desired block right under the start block.";
 Blockly.Msg.TOUR1_DESCRIPTION09 =
-  "Here you find some shortcuts!<br>From left to right:<br><span class='typcn typcn-media-play'></span> Click here to execute the program on the real robot<br><span class='typcn typcn-cloud-storage'></span> Save your program, but before that you need to sign in<br><span class='typcn typcn-zoom'></span> Click here and zoom in on the blocks, if you want to<br><span class='typcn typcn-archive'></span> The trashcan! Just move blocks into the trashcan and they will be deleted.<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Attention: You cannot recover blocks once they are deleted!<br>";
+  "Here you find some shortcuts!<br>From left to right:<br><span class='typcn typcn-media-play'></span> Click here to execute the program on the real robot<br><span class='typcn typcn-cloud-storage'></span> Save your program, but before that you need to sign in<br><span class='typcn typcn-refresh'></span> Click here and zoom in on the blocks, if you want to<br><span class='typcn typcn-archive'></span> The trashcan! Just move blocks into the trashcan and they will be deleted.<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Attention: You cannot recover blocks once they are deleted!<br>";
 Blockly.Msg.TOUR1_DESCRIPTION10 = "Click on \u00bbAction\u00ab";
 Blockly.Msg.TOUR1_DESCRIPTION12 =
   "Now drag'n drop the new block just below the start-program-block so that they are connected";

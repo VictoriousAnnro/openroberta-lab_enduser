@@ -1402,7 +1402,7 @@ limitations under the License.
                 title="Restart simulation"
                 style="margin-left: 6px"
               >
-                <span class="simRestartMain typcn typcn-refresh"></span>
+                <span class="simRestartMain">Reset</span>
               </div>
               <div
                 class="rightMenuButton"
@@ -1770,6 +1770,18 @@ limitations under the License.
               type="button"
             ></button>
             <button
+              class="blbtn"
+              data-bs-original-title="restart"
+              id="simRestart"
+              onclick="window._simRestartDebug && window._simRestartDebug(event)"
+              lkey="Blockly.Msg.MENU_SIM_RESTART_TOOLTIP"
+              rel="tooltip"
+              title="restart"
+              type="button"
+            >
+              Reset
+            </button>
+            <button
               class="blbtn typcn typcn-arrow-forward-outline debug"
               data-bs-original-title=""
               id="simControlStepOver"
@@ -1821,15 +1833,6 @@ limitations under the License.
               title=""
               type="button"
             ></button>
-            <button
-              class="blbtn typcn typcn-refresh"
-              data-bs-original-title="restart"
-              id="simRestart"
-              lkey="Blockly.Msg.MENU_SIM_RESTART_TOOLTIP"
-              rel="tooltip"
-              title="restart"
-              type="button"
-            ></button>
           </div>
           <div
             class="pace"
@@ -1848,28 +1851,27 @@ limitations under the License.
         <!-- Visible restart button (added by dev assistant) -->
         <style id="simRestartVisibleStyle">
           #simRestartVisible {
-            position: fixed;
-            left: 20px;
-            bottom: 20px;
-            z-index: 99999;
-            background: transparent;
-            color: #000;
-            border: none;
-            padding: 0;
-            width: 96px;
-            height: 96px;
-            border-radius: 10px;
-            box-shadow: none;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
+            /* Hidden: restart now available on the Blockly bottom-right control */
+            display: none !important;
           }
-          /* slightly smaller black icon, less padding */
-          #simRestartVisible .typcn {
-            font-size: 44px;
+          /* slightly smaller black text, less padding */
+          #simRestartVisible {
+            font-size: 18px;
             line-height: 1;
             color: #000;
+            padding: 6px 10px;
+            border-radius: 4px;
+            background: transparent;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            font-weight: 700;
+          }
+          /* toolbar / main control */
+          .simRestartMain {
+            font-weight: 700;
+          }
+          /* small control near play button */
+          #simRestart {
+            font-weight: 700;
           }
           #simRestartVisible:disabled {
             opacity: 0.6;
@@ -1886,7 +1888,7 @@ limitations under the License.
           aria-label="Restart simulation"
           type="button"
         >
-          <span class="typcn typcn-refresh"></span>
+          Reset
         </button>
 
         <script>
@@ -1905,7 +1907,7 @@ limitations under the License.
               if (!btn) return;
               btn.addEventListener("click", function () {
                 btn.disabled = true;
-                fetch("/restart_scene")
+                fetch("/restart_server")
                   .then(function (resp) {
                     return resp.json();
                   })
@@ -5012,6 +5014,51 @@ limitations under the License.
       </div>
     </template>
     <script>
+      // Global debug helper so clicks always produce a console log and a
+      // same-origin fetch to /restart_server. This helps when handlers
+      // aren't firing due to timing or other script issues.
+      window._simRestartDebug = function (ev) {
+        try {
+          if (ev && ev.preventDefault) ev.preventDefault();
+        } catch (e) {}
+        console.info("_simRestartDebug() invoked", ev && ev.type);
+        var btn =
+          ev && ev.currentTarget
+            ? ev.currentTarget
+            : document.getElementById("simRestart");
+        if (btn && btn.classList) btn.classList.add("disabled");
+        // Use explicit backend origin so the request goes to the Flask API
+        // (UI is served on port 1999; backend typically on 5000).
+        fetch("http://localhost:5000/restart_scene", {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          mode: "cors",
+        })
+          .then(function (r) {
+            console.info("_simRestartDebug: fetch completed status=", r.status);
+            return r.json().catch(function () {
+              return null;
+            });
+          })
+          .then(function (j) {
+            if (j && j.status === "success") {
+              console.info("_simRestartDebug: server scheduled restart");
+              if (window.displayToast)
+                window.displayToast("Simulation restarted");
+            } else {
+              console.warn("_simRestartDebug: restart response", j);
+              if (window.displayToast) window.displayToast("Restart failed");
+            }
+          })
+          .catch(function (err) {
+            console.error("_simRestartDebug: fetch error", err);
+            if (window.displayToast) window.displayToast("Restart failed");
+          })
+          .finally(function () {
+            if (btn && btn.classList) btn.classList.remove("disabled");
+          });
+      };
+
       // Simulation restart button handler: call backend to reinitialize the MuJoCo scene
       (function () {
         if (typeof window.jQuery === "undefined") return;
@@ -5020,10 +5067,16 @@ limitations under the License.
           $("#simRestart, #simRestartMain")
             .off("click")
             .on("click", function (e) {
+              // prefer the debug helper which logs and uses fetch
+              if (window._simRestartDebug) {
+                window._simRestartDebug(e);
+                return false;
+              }
               e.preventDefault();
               var $btn = $(this);
               $btn.addClass("disabled");
-              $.get("/restart_scene")
+              // Call the scene-restart endpoint on the backend
+              $.get("http://localhost:5000/restart_scene")
                 .done(function (res) {
                   try {
                     if (res && res.status === "success") {

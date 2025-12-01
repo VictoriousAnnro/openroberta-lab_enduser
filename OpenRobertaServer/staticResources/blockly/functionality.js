@@ -2891,10 +2891,78 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     }
   }
 
+  // add eventlistener for restart button
+  function initRestartButton(workspace) {
+    try {
+      const btn = document.getElementById("simRestart");
+      if (btn) {
+        btn.addEventListener("click", function () {
+          // Backend base (must match the Flask server host:port)
+          const backend = "http://localhost:5000";
+
+          // Call injected debug helper for client-side logging if present.
+          if (
+            typeof window !== "undefined" &&
+            typeof window._simRestartDebug === "function"
+          ) {
+            try {
+              window._simRestartDebug();
+            } catch (e) {
+              console.error("_simRestartDebug threw:", e);
+            }
+          }
+
+          // Always attempt to contact the backend restart endpoint (CORS enabled on server).
+          try {
+            fetch(backend + "/restart_scene", {
+              method: "GET",
+              mode: "cors",
+              headers: { Accept: "application/json" },
+            })
+              .then((resp) => console.info("/restart_scene ->", resp.status))
+              .catch((err) =>
+                console.error("/restart_scene fetch error:", err)
+              );
+          } catch (e) {
+            console.error("restart fetch failed:", e);
+          }
+        });
+      }
+
+      // Some UIs use a secondary id for the main toolbar button
+      const btnMain = document.getElementById("simRestartMain");
+      if (btnMain && btn && typeof btn.click === "function") {
+        btnMain.addEventListener("click", function () {
+          try {
+            btn.click();
+          } catch (e) {
+            // If programmatic click isn't available, just call the handler path
+            if (
+              typeof window !== "undefined" &&
+              typeof window._simRestartDebug === "function"
+            ) {
+              try {
+                window._simRestartDebug();
+              } catch (ee) {
+                console.error("_simRestartDebug threw:", ee);
+              }
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("initRestartButton failed to attach handlers:", e);
+    }
+  }
+
   // highlightOnlyFunctionCandidates is called in main.js
   // call my functions same way
   async function newRunBrick(workspace) {
-    const apiUrl = "http://127.0.0.1:5000"; // Flask app URL
+    // Base backend URL. The Flask API typically runs on port 5000 while
+    // the static UI is served from port 1999. Use the explicit backend
+    // origin so requests reach the Flask process instead of the UI
+    // server (falls back to localhost:5000).
+    const apiUrl = "http://localhost:5000"; // base path for backend API
     console.info("launching viewer!");
 
     //wait for viewer to be ready
@@ -3458,8 +3526,10 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     try {
       const response = await fetch(url, {
         method: "GET",
+        // Allow CORS when calling the backend origin (Flask will allow the UI origin).
+        mode: "cors",
         headers: {
-          "Content-Type": "application/json",
+          Accept: "application/json",
         },
       });
 
@@ -3524,6 +3594,8 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
         ? highlightOnlyFunctionCandidates
         : null,
     initRunBrick: typeof initRunBrick !== "undefined" ? initRunBrick : null,
+    initRestartButton:
+      typeof initRestartButton !== "undefined" ? initRestartButton : null,
     revealDefinitionWorkspacePane:
       typeof revealDefinitionWorkspacePane !== "undefined"
         ? revealDefinitionWorkspacePane
