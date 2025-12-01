@@ -405,12 +405,9 @@ def restart_scene():
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-
-@app.route("/restart_server", methods=['GET'])
-@cross_origin()
-def restart_server():
-    """Restart the Flask API process.
+    
+    
+"""Restart the Flask API process.
 
     This schedules an in-process execv to replace the current Python
     process with a new one using the same argv. The request handler
@@ -418,6 +415,11 @@ def restart_server():
     thread. If execv fails we fall back to exiting the process to allow
     an external supervisor to restart it.
     """
+"""
+@app.route("/restart_server", methods=['GET'])
+@cross_origin()
+def restart_server():
+    
     try:
         # Debug: log incoming request headers for troubleshooting
         try:
@@ -443,6 +445,8 @@ def restart_server():
         return {"status": "success", "message": "Server restart scheduled"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+"""
+
 
 # driver function
 if __name__ == '__main__':
