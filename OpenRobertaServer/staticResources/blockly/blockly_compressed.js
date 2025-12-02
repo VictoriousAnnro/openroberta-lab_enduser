@@ -39624,10 +39624,10 @@ Blockly.Blocks.naoActions_moveToObject = {
   init: function () {
     this.setColour(Blockly.CAT_ACTION_RGB);
     var a = new Blockly.FieldDropdown([
-      ["nitrogen cylinder", "nitrogen_tool"],
+      ["methanol cylinder", "nitrogen_tool"],
       ["chloroform syringe", "chloroform_syringe"],
       ["toluene syringe", "toluene_syringe"],
-      ["nitrogen cylinder slot", "nitrogen_slot"],
+      ["methanol cylinder slot", "nitrogen_slot"],
       ["chloroform syringe slot", "chloroform_slot"],
       ["toluene syringe slot", "toluene_slot"],
       ["mix cylinder", "mix_station"],
@@ -39645,7 +39645,7 @@ Blockly.Blocks.naoActions_pickObject = {
   init: function () {
     this.setColour(Blockly.CAT_ACTION_RGB);
     var a = new Blockly.FieldDropdown([
-      ["nitrogen tool", "nitrogen_tool"],
+      ["methanol cylinder", "nitrogen_tool"],
       ["chloroform syringe", "chloroform_syringe"],
       ["toluene syringe", "toluene_syringe"],
     ]);

@@ -2372,10 +2372,36 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     );
   }
 
+  // Some blocks should be treated as atomic sequence elements for the
+  // purposes of duplicate-detection. In particular, procedure-call blocks
+  // (the native OpenRoberta call blocks) contain value-argument shadow
+  // children which should NOT be expanded into separate sequence tokens.
+  function isAtomicBlockType(type) {
+    if (!type || typeof type !== "string") return false;
+    return (
+      type === "robProcedures_callnoreturn" ||
+      type === "customProcedures_callnoreturn" ||
+      type === "procedures_callnoreturn" ||
+      type === "robProcedures_callreturn" ||
+      type === "customProcedures_callreturn" ||
+      type === "procedures_callreturn"
+    );
+  }
+
   function serializeBlockTree(block) {
     if (!block || !blockIsStructurallyComplete(block)) {
       return null;
     }
+    // Treat certain block types as atomic sequence elements. These blocks
+    // (e.g. procedure call blocks) may contain shadow/value children which
+    // should not be inlined into the structural signature. Returning a
+    // compact atomic representation here ensures they count as a single
+    // token for duplicate-detection.
+    try {
+      if (isAtomicBlockType(block.type)) {
+        return { type: block.type, fields: "__IGNORED__", inputs: {} };
+      }
+    } catch (e) {}
 
     let obj = {
       type: block.type,
@@ -2454,12 +2480,21 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     // Use a visited set to avoid adding the same block multiple times
     const visited = new Set();
 
-    // Also include statement-inputs that belong to the startBlock itself
+    // Also include statement-inputs that belong to the startBlock itself.
+    // IMPORTANT: only inline statement (NEXT_STATEMENT) inputs here. Value
+    // inputs (INPUT_VALUE) typically hold parameter/value blocks which should
+    // not be treated as independent sequence elements for duplication
+    // detection.
     try {
       if (Array.isArray(startBlock.inputList) && startBlock.inputList.length) {
         startBlock.inputList.forEach((input) => {
           try {
-            if (input && input.connection && input.connection.targetBlock) {
+            if (
+              input &&
+              input.connection &&
+              input.connection.targetBlock &&
+              input.connection.type === Blockly.NEXT_STATEMENT
+            ) {
               let child = input.connection.targetBlock();
               while (child) {
                 try {
@@ -2526,11 +2561,18 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
         }
 
         // For each statement input on this block, inline its contained
-        // chain (this handles IF/REPEAT 'do' sections).
+        // chain (this handles IF/REPEAT 'do' sections). Only consider
+        // statement (NEXT_STATEMENT) inputs — skip value inputs that hold
+        // parameter/value blocks.
         if (Array.isArray(b.inputList) && b.inputList.length) {
           b.inputList.forEach((input) => {
             try {
-              if (input && input.connection && input.connection.targetBlock) {
+              if (
+                input &&
+                input.connection &&
+                input.connection.targetBlock &&
+                input.connection.type === Blockly.NEXT_STATEMENT
+              ) {
                 let child = input.connection.targetBlock();
                 while (child) {
                   if (!visited.has(child.id)) {
@@ -2952,6 +2994,50 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
         const key = group.map((b) => structureKey(b)).join("|SEQ|");
 
         if (!sequences[key]) sequences[key] = [];
+        // Debug: when sequences involve created reusable components or
+        // procedure-call blocks, log diagnostic info to help trace why
+        // they qualify as duplicate candidates.
+        try {
+          const debugHit = group.some((blk) => {
+            try {
+              if (!blk) return false;
+              const t = blk.type || "";
+              if (
+                t.indexOf &&
+                (t.indexOf("robProcedures_") === 0 ||
+                  t.indexOf("customProcedures_") === 0 ||
+                  t.indexOf("procedures_") === 0)
+              ) {
+                return true;
+              }
+              if (typeof blk.getField === "function") {
+                try {
+                  const nameField = blk.getField("NAME");
+                  if (nameField && typeof nameField.getValue === "function") {
+                    const v = nameField.getValue();
+                    if (v && String(v).indexOf("ReusableComponent") === 0)
+                      return true;
+                  }
+                } catch (ee) {}
+              }
+              return false;
+            } catch (e) {
+              return false;
+            }
+          });
+          if (debugHit) {
+            try {
+              console.log("dup-candidate", {
+                startIndex: startIndex,
+                length: length,
+                typeCounts: Array.from(typeCounts.entries()),
+                groupTypes: group.map((g) => (g && g.type) || "__null__"),
+                key: key,
+              });
+            } catch (ee) {}
+          }
+        } catch (e) {}
+
         sequences[key].push(group);
       }
     }
@@ -3020,6 +3106,37 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
       const duplicateInfo = duplicateMeta[key];
 
       if (registryEntry && groups.length >= 1) {
+        // Debug: if the matched groups involve a ReusableComponent, log
+        // the registry entry so we know which structural signature maps
+        // to which reusable component name.
+        try {
+          const anyReusable = groups.some((grp) =>
+            Array.isArray(grp)
+              ? grp.some((blk) => {
+                  try {
+                    if (!blk) return false;
+                    const f = blk.getField && blk.getField("NAME");
+                    return (
+                      f &&
+                      typeof f.getValue === "function" &&
+                      String(f.getValue()).indexOf("ReusableComponent") === 0
+                    );
+                  } catch (e) {
+                    return false;
+                  }
+                })
+              : false
+          );
+          if (anyReusable) {
+            try {
+              console.log("reuse-match", {
+                key: key,
+                registryEntry: registryEntry,
+              });
+            } catch (e) {}
+          }
+        } catch (e) {}
+
         const sequenceKey = key + "::reuse";
         if (
           promptedSignatures.has(sequenceKey) ||
