@@ -2607,7 +2607,7 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
   const MIN_DISTINCT_BLOCK_TYPES = 3;
   const DUPLICATE_SEQUENCE_COLORS = ["#43c208", "#43c208"];
   const DUPLICATE_SEQUENCE_ANIMATION_INTERVAL_MS = 450;
-  const DROPDOWN_PARAM_NAME_PREFIX = "Object";
+  const DROPDOWN_PARAM_NAME_PREFIX = "Chemistry Object";
 
   function getActiveDuplicateColour(workspace) {
     if (!Array.isArray(DUPLICATE_SEQUENCE_COLORS) || !workspace) {
