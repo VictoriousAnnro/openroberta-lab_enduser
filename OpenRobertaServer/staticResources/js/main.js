@@ -548,8 +548,84 @@ require.config({
                   if (startBlock && !ws.__repetitionDetectorAttached) {
                     ws.__repetitionDetectorAttached = true;
                     var repTimer = null;
+
+                    // Feature flag (persisted). Default: enabled.
+                    try {
+                      window.OR_HIGHLIGHT_FUNCTION_ENABLED =
+                        localStorage.getItem("or.highlightFunctions") !==
+                        "false";
+                    } catch (e) {
+                      window.OR_HIGHLIGHT_FUNCTION_ENABLED = true;
+                    }
+
+                    // Create a small toggle in the header to enable/disable highlighting.
+                    try {
+                      var createHighlightToggle = function () {
+                        try {
+                          if (
+                            document.getElementById(
+                              "orHighlightToggleContainer"
+                            )
+                          )
+                            return;
+                          // Create a floating container so we don't alter existing layout
+                          var container = document.createElement("div");
+                          container.id = "orHighlightToggleContainer";
+                          container.style.cssText =
+                            "position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:10000;pointer-events:auto;" +
+                            "background:rgba(0,0,0,0.45);padding:6px 8px;border-radius:6px;color:#fff;font-size:13px;max-width:90%;text-align:center;";
+
+                          var chk = document.createElement("input");
+                          chk.type = "checkbox";
+                          chk.id = "orHighlightCheckbox";
+                          chk.style.cssText =
+                            "margin-right:6px;vertical-align:middle;";
+                          chk.checked = !!window.OR_HIGHLIGHT_FUNCTION_ENABLED;
+                          chk.addEventListener("change", function () {
+                            try {
+                              window.OR_HIGHLIGHT_FUNCTION_ENABLED =
+                                !!this.checked;
+                              try {
+                                localStorage.setItem(
+                                  "or.highlightFunctions",
+                                  this.checked ? "true" : "false"
+                                );
+                              } catch (e) {}
+                              if (this.checked) {
+                                try {
+                                  func.highlightOnlyFunctionCandidates(
+                                    ws,
+                                    startBlock
+                                  );
+                                } catch (e) {}
+                              }
+                            } catch (e) {}
+                          });
+
+                          var label = document.createElement("label");
+                          label.htmlFor = "orHighlightCheckbox";
+                          label.style.cssText = "color:inherit;cursor:pointer;";
+                          var txt = document.createTextNode("Enhanced version");
+
+                          label.appendChild(chk);
+                          label.appendChild(txt);
+                          container.appendChild(label);
+
+                          // Add a subtle hide-on-small-screen behavior
+                          try {
+                            document.body.appendChild(container);
+                          } catch (e) {
+                            // best-effort fallback: attach to documentElement
+                            document.documentElement.appendChild(container);
+                          }
+                        } catch (e) {}
+                      };
+                      createHighlightToggle();
+                    } catch (e) {}
+
                     ws.addChangeListener(function (event) {
                       try {
+                        if (!window.OR_HIGHLIGHT_FUNCTION_ENABLED) return;
                         if (repTimer) clearTimeout(repTimer);
                         repTimer = setTimeout(function () {
                           try {
@@ -561,7 +637,8 @@ require.config({
                         }, 250);
                       } catch (e) {}
                     });
-                    /*
+                  }
+                  /*
                       // Trigger an initial check shortly after attachment
                       try {
                         if (repTimer) clearTimeout(repTimer);
@@ -569,8 +646,7 @@ require.config({
                           try { func.highlightOnlyFunctionCandidates(ws, startBlock); } catch (e) {}
                         }, 50);
                       } catch (e) {}
-                       */
-                  }
+                      */
                 }
               } catch (inner) {
                 console.warn(

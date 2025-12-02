@@ -16339,6 +16339,9 @@ Blockly.RobControls.prototype.createButton_ = function (a, b, c, d) {
     });
   e.posX = b;
   e.posY = c;
+  // Store the message key on the button group for later refreshes.
+  // For the special zoom/reset control we prefer to use a literal tooltip
+  // on the graphic element itself (so localization keys won't override it).
   e.tooltip = d;
   f.tooltip = Blockly.Msg[d];
   Blockly.Tooltip.bindMouseEvents(f);
@@ -16349,27 +16352,20 @@ Blockly.RobControls.prototype.createButton_ = function (a, b, c, d) {
   var btnGraphic;
   try {
     if (a === Blockly.RobControls.prototype.PATH_ZOOM_) {
-      btnGraphic = Blockly.createSvgElement(
-        "text",
-        {
-          class: "blocklyButtonText",
-          x: "24",
-          y: "30",
-          "text-anchor": "middle",
-          "dominant-baseline": "middle",
-          "font-size": "14",
-          "font-weight": "bold",
-          fill: "#333",
-        },
-        null
-      );
-      // Insert text content
-      try {
-        btnGraphic.textContent = "Reset";
-      } catch (errText) {
-        // Fallback for older browsers
-        btnGraphic.appendChild(document.createTextNode("Reset"));
-      }
+      // Use an inline SVG path for the reset icon instead of literal text.
+      // This keeps the UI compact and replaces the word "Reset" with an icon.
+      btnGraphic = Blockly.createSvgElement("path", {
+        class: "blocklyButtonPath",
+        // A compact circular arrow path that serves as a reset/refresh icon.
+        // The path is intentionally simple and scaled to match other icons.
+        d: "M12 2 C6.48 2 2 6.48 2 12 c0 5.52 4.48 10 10 10 c5.52 0 10-4.48 10-10 h-2 c0 4.41-3.59 8-8 8 c-4.41 0-8-3.59-8-8 c0-4.41 3.59-8 8-8 v4 l4-4 l-4-4 v4 z",
+        // Scale the 24x24 icon to match other button icons and translate
+        // so its center (12,12) maps to the button center (24,24).
+        transform: "scale(1.5) translate(6,6)",
+        "fill-rule": "evenodd",
+        "stroke-width": "0px",
+        fill: "#333",
+      });
     } else {
       btnGraphic = Blockly.createSvgElement("path", {
         class: "blocklyButtonPath",
@@ -16391,7 +16387,21 @@ Blockly.RobControls.prototype.createButton_ = function (a, b, c, d) {
       fill: "#333",
     });
   }
-  btnGraphic.tooltip = Blockly.Msg[d];
+  // Use a specific literal tooltip for the zoom/reset control so hover
+  // shows the exact string we want and it is not later overwritten by
+  // `refreshTooltips` which prefers localization keys.
+  if (a === Blockly.RobControls.prototype.PATH_ZOOM_) {
+    btnGraphic.tooltip = "Reset robot simulator";
+    // Prevent later refreshTooltips() calls from overriding the literal
+    // by clearing the stored msg-key on the button group. The refresh
+    // function will only apply when a valid Blockly.Msg entry exists.
+    e.tooltip = null;
+    // Also clear the back rect tooltip so only the graphic's literal
+    // tooltip is used for this special control.
+    f.tooltip = null;
+  } else {
+    btnGraphic.tooltip = Blockly.Msg[d];
+  }
   Blockly.Tooltip.bindMouseEvents(btnGraphic);
   e.appendChild(btnGraphic);
   this.buttons.push(e);
@@ -16452,10 +16462,16 @@ Blockly.RobControls.prototype.showStopProgram = function () {
 };
 Blockly.RobControls.prototype.refreshTooltips = function (a) {
   for (var b = 0; b < this.buttons.length; b++) {
-    var c = Blockly.Msg[this.buttons[b].tooltip];
-    c.indexOf("$") >= 0 && (c = c.replace("$", a));
-    this.buttons[b].childNodes[0].tooltip = c;
-    this.buttons[b].childNodes[1].tooltip = c;
+    var key = this.buttons[b].tooltip;
+    var c = key ? Blockly.Msg[key] : null;
+    // Only override the existing child tooltips when we have a valid
+    // localization string. If `c` is null/undefined, skip to preserve any
+    // literal tooltip already set on the child nodes.
+    if (typeof c === "string") {
+      c.indexOf("$") >= 0 && (c = c.replace("$", a));
+      this.buttons[b].childNodes[0].tooltip = c;
+      this.buttons[b].childNodes[1].tooltip = c;
+    }
   }
 };
 Blockly.RobControls.prototype.showZoom = function (a) {
@@ -28898,7 +28914,7 @@ Blockly.Msg.MENU_SIM_STOP_TOOLTIP = "Stop your program in the simulation.";
 Blockly.Msg.MENU_SIM_TRAIL_TOOLTIP = "Enable/Disable robot draw trail.";
 Blockly.Msg.MENU_SIM_VALUES_TOOLTIP = "Open/close the sensors' data view.";
 Blockly.Msg.MENU_SOURCE_CODE_EDITOR = "open source code editor";
-Blockly.Msg.MENU_START_BRICK = "run on \u00bb$\u00ab";
+Blockly.Msg.MENU_START_BRICK = "run on robot simulator";
 Blockly.Msg.MENU_START_SIM = "open/close simulation view";
 Blockly.Msg.MENU_STATE_INFO = "state information";
 Blockly.Msg.MENU_STOP_BRICK = "stop program on \u00bb$\u00ab";
@@ -28912,10 +28928,10 @@ Blockly.Msg.MENU_USERGROUP_LOG_IN = "Log in with user group ...";
 Blockly.Msg.MENU_USER_STATE_TOOLTIP = "user info";
 Blockly.Msg.MENU_USER_TOOLTIP = "user";
 Blockly.Msg.MENU_WLAN_CREDENTIALS = "WLAN credentials";
-Blockly.Msg.MENU_ZOOM = "zoom";
+Blockly.Msg.MENU_ZOOM = "reset robot simulator";
 Blockly.Msg.MENU_ZOOM_IN = "zoom in";
 Blockly.Msg.MENU_ZOOM_OUT = "zoom out";
-Blockly.Msg.MENU_ZOOM_RESET = "reset zoom";
+Blockly.Msg.MENU_ZOOM_RESET = "reset";
 Blockly.Msg.MESSAGE_ADDED_USER = "User \u00bb$\u00ab was added";
 Blockly.Msg.MESSAGE_CONFIGURATION_DELETED =
   "Configuration \u00bb$\u00ab was deleted";
@@ -39582,13 +39598,13 @@ Blockly.Blocks.naoActions_moveToObject = {
   init: function () {
     this.setColour(Blockly.CAT_ACTION_RGB);
     var a = new Blockly.FieldDropdown([
-      ["nitrogen tool", "nitrogen_tool"],
+      ["nitrogen cylinder", "nitrogen_tool"],
       ["chloroform syringe", "chloroform_syringe"],
       ["toluene syringe", "toluene_syringe"],
-      ["nitrogen tool slot", "nitrogen_slot"],
+      ["nitrogen cylinder slot", "nitrogen_slot"],
       ["chloroform syringe slot", "chloroform_slot"],
       ["toluene syringe slot", "toluene_slot"],
-      ["mix station", "mix_station"],
+      ["mix cylinder", "mix_station"],
       ["analysis pad", "analysis_pad"],
     ]);
     this.appendDummyInput()
@@ -54302,10 +54318,10 @@ try {
   ) {
     Blockly.Blocks["naoActions_getResultInLaptop"] = {
       init: function () {
-        this.appendDummyInput().appendField("get result in laptop");
+        this.appendDummyInput().appendField("show response in laptop screen");
         this.setPreviousStatement(true);
         this.setNextStatement(true);
-        this.setColour(230);
+        this.setColour(Blockly.CAT_ACTION_RGB);
         this.setTooltip(
           "Show 'SUCCESS' or 'FAIL' on the laptop screen depending on analysis result"
         );

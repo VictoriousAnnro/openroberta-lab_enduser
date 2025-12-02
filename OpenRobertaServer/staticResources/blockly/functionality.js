@@ -32,7 +32,7 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
 if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActions_getResultInLaptop"]) {
   Blockly.Blocks["naoActions_getResultInLaptop"] = {
     init: function () {
-      this.appendDummyInput().appendField("get result in laptop");
+      this.appendDummyInput().appendField("show response in laptop screen");
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(230);
@@ -371,6 +371,40 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
 
     // 1. Extract parameters to determine required inputs
     let literalParams = extractLiteralParameters(group, workspace);
+
+    // If we have canonical definitions but this occurrence yielded no
+    // actual literal params, log contextual information to help debug
+    // why the fallback happens (preserve the original warning inside
+    // applyCanonicalParamNames as well).
+    if (
+      (!Array.isArray(literalParams) || literalParams.length === 0) &&
+      Array.isArray(canonicalParams) &&
+      canonicalParams.length > 0
+    ) {
+      try {
+        const groupLen = Array.isArray(group) ? group.length : 0;
+        const groupTypes = Array.isArray(group)
+          ? group.map((b) => (b && b.type ? b.type : String(b))).join(",")
+          : String(group);
+        const sample =
+          group && group[0]
+            ? JSON.stringify(serializeBlockMinimal(group[0]))
+            : "";
+        console.warn(
+          "applyCanonicalParamNames: missing actual params for function",
+          name,
+          "groupLength:",
+          groupLen,
+          "groupTypes:",
+          groupTypes,
+          "sample:",
+          sample,
+          "canonicalParamsLength:",
+          canonicalParams.length
+        );
+      } catch (e) {}
+    }
+
     literalParams = applyCanonicalParamNames(literalParams, canonicalParams);
 
     // 2. Build XML for the Native Call Block
@@ -969,7 +1003,50 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
       });
     }
 
-    group.forEach((rootBlock) => traverseBlock(rootBlock));
+    // Also consider top-level literal blocks that appear in the detected
+    // sequence but are not connected as input children of other blocks.
+    // These should be treated as parameters as well (e.g. a standalone
+    // `math_number` in the sequence).
+    group.forEach((rootBlock) => {
+      try {
+        if (!rootBlock) return;
+
+        const isTopLevelLiteral =
+          (rootBlock.type === "math_number" ||
+            rootBlock.type === "math_integer" ||
+            rootBlock.type === "text" ||
+            rootBlock.type === "logic_boolean") &&
+          (typeof rootBlock.getSurroundParent !== "function" ||
+            !rootBlock.getSurroundParent());
+
+        if (isTopLevelLiteral) {
+          try {
+            if (
+              rootBlock.type === "math_number" ||
+              rootBlock.type === "math_integer"
+            ) {
+              const v =
+                rootBlock.getFieldValue && rootBlock.getFieldValue("NUM");
+              if (v != null)
+                addParamOccurrence("Number", v, { kind: "literal" });
+            } else if (rootBlock.type === "text") {
+              const v =
+                rootBlock.getFieldValue && rootBlock.getFieldValue("TEXT");
+              if (v != null)
+                addParamOccurrence("String", v, { kind: "literal" });
+            } else if (rootBlock.type === "logic_boolean") {
+              const v =
+                rootBlock.getFieldValue && rootBlock.getFieldValue("BOOL");
+              if (v != null)
+                addParamOccurrence("Boolean", v, { kind: "literal" });
+            }
+          } catch (e) {}
+          return;
+        }
+      } catch (e) {}
+
+      traverseBlock(rootBlock);
+    });
     return params;
   }
 
@@ -1753,6 +1830,109 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     };
 
     walk(block);
+
+    // Second-pass cleanup: sometimes literal blocks (shadows or orphaned
+    // value blocks) remain inside the cloned definition body. Attempt to
+    // find them and replace with parameter variable getters by matching
+    // the literal value against the detected literalParams (best-effort).
+    try {
+      const cleanupMatchByValue = (root) => {
+        if (!root) return;
+
+        root.inputList.forEach((input) => {
+          try {
+            const target = input.connection && input.connection.targetBlock();
+            if (!target) return;
+
+            // If the target itself is a literal block, try to match it
+            // against an unused literal parameter by originalValue.
+            if (isLiteralBlock(target)) {
+              let litVal = null;
+              try {
+                if (
+                  target.type === "math_number" ||
+                  target.type === "math_integer"
+                )
+                  litVal = target.getFieldValue("NUM");
+                else if (target.type === "text")
+                  litVal = target.getFieldValue("TEXT");
+                else if (target.type === "logic_boolean")
+                  litVal = target.getFieldValue("BOOL");
+              } catch (e) {}
+
+              if (litVal != null) {
+                const candIdx = literalParams.findIndex(
+                  (p) => !p.used && String(p.originalValue) === String(litVal)
+                );
+                if (candIdx >= 0) {
+                  const matchedParam = literalParams[candIdx];
+
+                  // Create variables_get and connect
+                  const varGet = workspace.newBlock("variables_get");
+                  let variableModel = null;
+                  try {
+                    if (
+                      matchedParam.variableId &&
+                      typeof workspace.getVariableById === "function"
+                    ) {
+                      variableModel = workspace.getVariableById(
+                        matchedParam.variableId
+                      );
+                    }
+                    if (!variableModel) {
+                      variableModel = getOrCreateVariableModel(
+                        workspace,
+                        matchedParam
+                      );
+                    }
+                  } catch (e) {}
+
+                  const fieldValue =
+                    variableModel && typeof variableModel.getId === "function"
+                      ? variableModel.getId()
+                      : matchedParam.paramName;
+                  matchedParam.variableId =
+                    variableModel && typeof variableModel.getId === "function"
+                      ? variableModel.getId()
+                      : matchedParam.paramName;
+                  try {
+                    varGet.setFieldValue(fieldValue, "VAR");
+                  } catch (e) {}
+                  try {
+                    varGet.initSvg();
+                    varGet.render();
+                  } catch (e) {}
+
+                  try {
+                    // Dispose the literal and connect the var getter
+                    target.dispose(false, true);
+                  } catch (e) {}
+                  try {
+                    input.connection.connect(varGet.outputConnection);
+                  } catch (e) {}
+
+                  matchedParam.used = true;
+                  return; // continue to next input
+                }
+              }
+            }
+
+            // Otherwise descend into the target block to find nested literals
+            cleanupMatchByValue(target);
+          } catch (e) {}
+        });
+
+        // Also examine the subsequent next-chain
+        try {
+          const next = root.getNextBlock && root.getNextBlock();
+          if (next) cleanupMatchByValue(next);
+        } catch (e) {}
+      };
+
+      cleanupMatchByValue(block);
+    } catch (e) {
+      /* non-fatal cleanup error */
+    }
   }
 
   function buildDropdownKey(sourceType, fieldName) {
@@ -1802,8 +1982,8 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     }
 
     if (!Array.isArray(actualParams) || actualParams.length === 0) {
-      console.warn(
-        "applyCanonicalParamNames: missing actual params, falling back to canonical definitions"
+      console.debug(
+        "applyCanonicalParamNames: no actual params; using canonical definitions"
       );
       return cloneParamDefinitions(canonicalParams).map((p) => ({
         ...p,
@@ -2180,6 +2360,18 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     }
   }
 
+  // Treat simple literal value blocks (numbers, text, booleans) as
+  // parameterizable placeholders when computing structural signatures.
+  function isLiteralBlockType(type) {
+    if (!type || typeof type !== "string") return false;
+    return (
+      type === "math_number" ||
+      type === "math_integer" ||
+      type === "text" ||
+      type === "logic_boolean"
+    );
+  }
+
   function serializeBlockTree(block) {
     if (!block || !blockIsStructurallyComplete(block)) {
       return null;
@@ -2207,9 +2399,28 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
         let children = [];
 
         while (child) {
-          if (blockIsStructurallyComplete(child)) {
-            children.push(serializeBlockTree(child));
-          }
+          try {
+            if (!blockIsStructurallyComplete(child)) {
+              child = child.getNextBlock();
+              continue;
+            }
+
+            // If the child is a simple literal (math_number/text/boolean)
+            // we don't want the exact literal value to affect the structural
+            // signature. Represent it as a placeholder node so sequences that
+            // differ only by literal values still match.
+            if (isLiteralBlockType(child.type)) {
+              let litKind = "";
+              if (child.type === "math_number" || child.type === "math_integer")
+                litKind = "Number";
+              else if (child.type === "text") litKind = "String";
+              else if (child.type === "logic_boolean") litKind = "Boolean";
+
+              children.push({ type: "__LITERAL__", kind: litKind });
+            } else {
+              children.push(serializeBlockTree(child));
+            }
+          } catch (e) {}
           child = child.getNextBlock();
         }
 
@@ -2251,19 +2462,25 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
             if (input && input.connection && input.connection.targetBlock) {
               let child = input.connection.targetBlock();
               while (child) {
-                if (!visited.has(child.id)) {
-                  chain.push(child);
-                  visited.add(child.id);
-                }
-                // include child's subsequent next-chain as well
-                let nc = child.getNextBlock && child.getNextBlock();
-                while (nc) {
-                  if (!visited.has(nc.id)) {
-                    chain.push(nc);
-                    visited.add(nc.id);
+                try {
+                  // Skip simple literal blocks to avoid counting nested literals
+                  // as separate sequence elements.
+                  if (!isLiteralBlockType(child.type)) {
+                    if (!visited.has(child.id)) {
+                      chain.push(child);
+                      visited.add(child.id);
+                    }
+                    // include child's subsequent next-chain as well
+                    let nc = child.getNextBlock && child.getNextBlock();
+                    while (nc) {
+                      if (!isLiteralBlockType(nc.type) && !visited.has(nc.id)) {
+                        chain.push(nc);
+                        visited.add(nc.id);
+                      }
+                      nc = nc.getNextBlock && nc.getNextBlock();
+                    }
                   }
-                  nc = nc.getNextBlock && nc.getNextBlock();
-                }
+                } catch (e) {}
                 child = child.getNextBlock && child.getNextBlock();
               }
             }
@@ -2276,8 +2493,36 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     while (b) {
       try {
         if (!visited.has(b.id)) {
-          chain.push(b);
-          visited.add(b.id);
+          // If this is a simple literal block and the previous pushed
+          // block has an unfilled value input, treat the literal as
+          // belonging to that parent (don't add it as a separate chain item).
+          const isLit = isLiteralBlockType(b.type);
+          let attachToPrev = false;
+          if (isLit && chain.length) {
+            try {
+              const prev = chain[chain.length - 1];
+              if (prev && Array.isArray(prev.inputList)) {
+                const hasUnfilledValueInput = prev.inputList.some((inp) => {
+                  try {
+                    return (
+                      inp &&
+                      inp.connection &&
+                      typeof inp.connection.targetBlock === "function" &&
+                      !inp.connection.targetBlock()
+                    );
+                  } catch (e) {
+                    return false;
+                  }
+                });
+                if (hasUnfilledValueInput) attachToPrev = true;
+              }
+            } catch (e) {}
+          }
+
+          if (!attachToPrev) {
+            chain.push(b);
+            visited.add(b.id);
+          }
         }
 
         // For each statement input on this block, inline its contained
@@ -2320,7 +2565,7 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
   const MIN_DISTINCT_BLOCK_TYPES = 3;
   const DUPLICATE_SEQUENCE_COLORS = ["#43c208", "#43c208"];
   const DUPLICATE_SEQUENCE_ANIMATION_INTERVAL_MS = 450;
-  const DROPDOWN_PARAM_NAME_PREFIX = "Chemistry Object";
+  const DROPDOWN_PARAM_NAME_PREFIX = "Object";
 
   function getActiveDuplicateColour(workspace) {
     if (!Array.isArray(DUPLICATE_SEQUENCE_COLORS) || !workspace) {
@@ -2547,6 +2792,18 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
       try {
         function collectFromBlock(b, out) {
           if (!b) return;
+          // Helper to detect simple literal blocks which should not be
+          // treated as standalone sequence elements.
+          function isLiteralType(block) {
+            if (!block || !block.type) return false;
+            return (
+              block.type === "math_number" ||
+              block.type === "math_integer" ||
+              block.type === "text" ||
+              block.type === "logic_boolean"
+            );
+          }
+
           // For a block, collect its next-chain and also expand statement inputs in-order
           let cur = b.getNextBlock && b.getNextBlock();
           while (cur) {
@@ -2558,12 +2815,17 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
                   if (inp.connection && inp.connection.targetBlock) {
                     let child = inp.connection.targetBlock();
                     while (child) {
-                      out.push(child);
-                      // also include child's next-chain
-                      let nc = child.getNextBlock && child.getNextBlock();
-                      while (nc) {
-                        out.push(nc);
-                        nc = nc.getNextBlock && nc.getNextBlock();
+                      // Skip pushing simple literal blocks as separate sequence items.
+                      if (!isLiteralType(child)) {
+                        out.push(child);
+                        // also include child's next-chain (but skip literal-only chains)
+                        let nc = child.getNextBlock && child.getNextBlock();
+                        while (nc) {
+                          if (!isLiteralType(nc)) {
+                            out.push(nc);
+                          }
+                          nc = nc.getNextBlock && nc.getNextBlock();
+                        }
                       }
                       child = child.getNextBlock && child.getNextBlock();
                     }
@@ -2631,7 +2893,20 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
         });
       } catch (e) {}
     }
-    if (chain.length < SEQ_LEN) {
+    // Filter out simple literal-only blocks from the chain when performing
+    // sequence detection. This prevents nested numeric/text/boolean blocks
+    // from being treated as separate sequence elements.
+    const effectiveChain = Array.isArray(chain)
+      ? chain.filter((b) => {
+          try {
+            return !(b && isLiteralBlockType(b.type));
+          } catch (e) {
+            return true;
+          }
+        })
+      : [];
+
+    if (effectiveChain.length < SEQ_LEN) {
       clearSequenceHighlights(workspace);
       return;
     }
@@ -2646,15 +2921,16 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
       MAX_DUP_SEQUENCE_LENGTH
     );
 
-    for (let startIndex = 0; startIndex < chain.length; startIndex++) {
+    for (let startIndex = 0; startIndex < effectiveChain.length; startIndex++) {
       const typeCounts = new Map();
 
       for (
         let length = 1;
-        length <= maxSequenceLength && startIndex + length <= chain.length;
+        length <= maxSequenceLength &&
+        startIndex + length <= effectiveChain.length;
         length++
       ) {
-        const candidateBlock = chain[startIndex + length - 1];
+        const candidateBlock = effectiveChain[startIndex + length - 1];
 
         if (!blockIsStructurallyComplete(candidateBlock)) {
           break;
@@ -2671,7 +2947,7 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
           continue;
         }
 
-        const group = chain.slice(startIndex, startIndex + length);
+        const group = effectiveChain.slice(startIndex, startIndex + length);
         group.__startIndex = startIndex;
         const key = group.map((b) => structureKey(b)).join("|SEQ|");
 
