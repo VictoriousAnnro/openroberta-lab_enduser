@@ -13156,7 +13156,10 @@ Blockly.Tooltip.onMouseMove_ = function (a) {
         (Blockly.Tooltip.lastY_ = a.pageY),
         (Blockly.Tooltip.showPid_ = setTimeout(
           Blockly.Tooltip.show_,
-          Blockly.Tooltip.HOVER_MS
+          // Allow elements to opt into a faster/specific hover delay by
+          // setting `element.hoverMs`. Fall back to the global HOVER_MS.
+          (Blockly.Tooltip.element_ && Blockly.Tooltip.element_.hoverMs) ||
+            Blockly.Tooltip.HOVER_MS
         )));
 };
 Blockly.Tooltip.hide = function () {
@@ -16252,6 +16255,16 @@ Blockly.RobControls.prototype.createDom = function () {
     "MENU_START_BRICK"
   );
   this.runOnBrick.setAttribute("id", "runOnBrick");
+  // Attach a literal tooltip to the run button group so hovering anywhere
+  // on the control shows the exact message and it isn't overwritten by
+  // localization refreshes. Use a short hover delay for better UX.
+  this.runOnBrick.tooltip = "Run simulation";
+  this.runOnBrick.hoverMs = 80;
+  if (this.runOnBrick.childNodes && this.runOnBrick.childNodes.length >= 2) {
+    this.runOnBrick.childNodes[0].tooltip = this.runOnBrick;
+    this.runOnBrick.childNodes[1].tooltip = this.runOnBrick;
+  }
+  Blockly.Tooltip.bindMouseEvents(this.runOnBrick);
   this.stopBrick = this.createButton_(this.PATH_STOP_, 0, 0, "MENU_STOP_BRICK");
   this.stopBrick.setAttribute("id", "stopBrick");
   this.stopBrick.setAttribute("class", "robButtonHidden");
@@ -16391,18 +16404,31 @@ Blockly.RobControls.prototype.createButton_ = function (a, b, c, d) {
   // shows the exact string we want and it is not later overwritten by
   // `refreshTooltips` which prefers localization keys.
   if (a === Blockly.RobControls.prototype.PATH_ZOOM_) {
-    btnGraphic.tooltip = "Reset robot simulator";
-    // Prevent later refreshTooltips() calls from overriding the literal
-    // by clearing the stored msg-key on the button group. The refresh
-    // function will only apply when a valid Blockly.Msg entry exists.
-    e.tooltip = null;
-    // Also clear the back rect tooltip so only the graphic's literal
-    // tooltip is used for this special control.
-    f.tooltip = null;
+    // Attach the literal tooltip to the whole button group so hovering
+    // anywhere on the control shows the message.
+    e.tooltip = "Reset robot simulator";
+    // Use a group-level hover delay so the whole control is responsive.
+    e.hoverMs = 80;
+    // Point child element tooltip references to the group so the
+    // tooltip resolution logic walks up to the group string.
+    btnGraphic.tooltip = e;
+    f.tooltip = e;
   } else {
-    btnGraphic.tooltip = Blockly.Msg[d];
+    // For the run-on-brick control prefer a literal tooltip so it is not
+    // overwritten by localization refreshes. This mirrors the special-case
+    // handling used for the zoom/reset control above.
+    if (d === "MENU_START_BRICK") {
+      e.tooltip = "Run simulation";
+      e.hoverMs = 80;
+      btnGraphic.tooltip = e;
+      f.tooltip = e;
+    } else {
+      btnGraphic.tooltip = Blockly.Msg[d];
+    }
   }
-  Blockly.Tooltip.bindMouseEvents(btnGraphic);
+  // Bind tooltip events on the group so mouse events anywhere inside the
+  // control are handled consistently.
+  Blockly.Tooltip.bindMouseEvents(e);
   e.appendChild(btnGraphic);
   this.buttons.push(e);
   return e;
