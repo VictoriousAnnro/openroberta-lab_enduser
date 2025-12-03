@@ -612,7 +612,7 @@
       select.style.fontSize = "12px";
 
       const opts = [
-        { v: "colour", t: "Colour Highlight" },
+        { v: "colour", t: "Green Colour Highlight" },
         { v: "animated", t: "Animated Highlight" },
         { v: "border", t: "Border Highlight" },
       ];
