@@ -612,6 +612,108 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     )},${Math.round(c1.g + (c2.g - c1.g) * amount)},${Math.round(c1.b + (c2.b - c1.b) * amount)})`;
   }
 
+  // Duplicate highlight mode helpers
+  // Modes: 'colour' (default), 'animated', 'border'
+  function getDuplicateHighlightMode(workspace) {
+    try {
+      if (workspace && workspace.__dupHighlightMode)
+        return workspace.__dupHighlightMode;
+    } catch (e) {}
+    try {
+      const stored =
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("or_dupHighlightMode");
+      if (stored) return stored;
+    } catch (e) {}
+    return "colour";
+  }
+
+  function setDuplicateHighlightMode(workspace, mode) {
+    try {
+      if (workspace) workspace.__dupHighlightMode = mode;
+    } catch (e) {}
+    try {
+      if (typeof localStorage !== "undefined")
+        localStorage.setItem("or_dupHighlightMode", mode);
+    } catch (e) {}
+  }
+
+  function initDuplicateHighlightModeSelector(workspace) {
+    try {
+      // Avoid creating multiple selectors
+      if (document.getElementById("orHighlightModeSelect")) return;
+
+      const select = document.createElement("select");
+      select.id = "orHighlightModeSelect";
+      select.title = "Select duplicate highlight mode";
+      select.style.marginLeft = "8px";
+      select.style.fontSize = "12px";
+
+      const opts = [
+        { v: "colour", t: "Colour Highlight" },
+        { v: "animated", t: "Animated Highlight" },
+        { v: "border", t: "Border Highlight" },
+      ];
+      opts.forEach((o) => {
+        const el = document.createElement("option");
+        el.value = o.v;
+        el.textContent = o.t;
+        select.appendChild(el);
+      });
+
+      // Set current value
+      const cur = getDuplicateHighlightMode(workspace);
+      select.value = cur || "colour";
+
+      select.addEventListener("change", function () {
+        setDuplicateHighlightMode(workspace, select.value);
+        // Clear any existing highlights so new mode is cleanly applied
+        try {
+          clearSequenceHighlights(workspace);
+        } catch (e) {}
+      });
+
+      // Try to place next to known toolbar elements, fall back to body
+      const targetIds = [
+        "simToolbar",
+        "simControls",
+        "toolbar",
+        "mainToolbar",
+        "topbar",
+      ];
+      let placed = false;
+      for (let id of targetIds) {
+        const el = document.getElementById(id);
+        if (el) {
+          el.appendChild(select);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        // append to body but keep it unobtrusive (bottom-left)
+        const container = document.createElement("div");
+        container.style.position = "fixed";
+        container.style.left = "12px";
+        container.style.bottom = "12px";
+        container.style.zIndex = 9999;
+        container.style.background = "rgba(255,255,255,0.9)";
+        container.style.padding = "6px";
+        container.style.borderRadius = "4px";
+        container.style.boxShadow = "0 1px 4px rgba(0,0,0,0.2)";
+        const label = document.createElement("label");
+        label.style.marginRight = "6px";
+        label.style.fontSize = "12px";
+        label.textContent = "Highlight:";
+        container.appendChild(label);
+        container.appendChild(select);
+        document.body.appendChild(container);
+      }
+    } catch (e) {
+      console.warn("initDuplicateHighlightModeSelector failed", e);
+    }
+  }
+
   // Utility to purge plain objects that track detection state.
   function clearObjectStore(store) {
     if (!store) {
@@ -2204,96 +2306,116 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
   // ============================================================================
   // VISUAL HIGHLIGHTING AND DESIGN
   // ============================================================================
-  /*
   function applyBorderGlow(block) {
+    if (!block) return;
     if (block.__borderInterval) return;
 
-    let path = block.svgPath_;
+    let root = block.getSvgRoot();
+    if (!root) return;
+    // pick first path as representative
+    let path = block.svgPath_ || root.querySelector("path");
     if (!path) return;
 
     if (!block.__origStroke) {
-      // sanitize stroke color: Blockly may not accept 8-digit hex (#RRGGBBAA)
       var s = path.getAttribute("stroke") || "#000000";
       try {
         if (typeof s === "string" && /^#([0-9a-fA-F]{8})$/.test(s)) {
-          // drop alpha channel
           s = "#" + s.substr(1, 6);
         }
-      } catch (e) { }
+      } catch (e) {}
       block.__origStroke = s;
       block.__origStrokeWidth = path.getAttribute("stroke-width") || 2;
     }
 
-    let fromColor = "#000000";
-    let toColor = "#000000";
     let pulse = 0;
     let direction = 1;
 
     block.__borderInterval = setInterval(() => {
-      pulse += direction * 0.05;
-
+      pulse += direction * 0.06;
       if (pulse >= 1) direction = -1;
       if (pulse <= 0) direction = 1;
 
-      let strokeColor = mixColors(fromColor, toColor, pulse);
-
-      path.setAttribute("stroke", strokeColor);
-      path.setAttribute("stroke-width", 4);
+      let strokeColor = mixColors(
+        block.__origStroke || "#000000",
+        "#ffffff",
+        pulse
+      );
+      try {
+        path.setAttribute("stroke", strokeColor);
+        path.setAttribute("stroke-width", 4);
+      } catch (e) {}
     }, 50);
   }
-*/
   function removeBorderGlow(block) {
     if (!block) return;
 
+    // Stop any running pulse
     if (block.__borderInterval) {
-      clearInterval(block.__borderInterval);
+      try {
+        clearInterval(block.__borderInterval);
+      } catch (e) {}
       block.__borderInterval = null;
     }
 
-    const hasStrokeData =
-      block.__origStroke != null ||
-      block.__origStrokeWidth != null ||
-      block.__origStrokeOp != null;
-
-    if (hasStrokeData) {
-      const root = block.getSvgRoot();
+    // Restore stroke attributes/styles on all likely SVG elements inside
+    // the block's root. We set both attributes and style properties to
+    // cover different rendering cases and then remove the saved originals.
+    try {
+      const root = block.getSvgRoot && block.getSvgRoot();
       if (root) {
-        const paths = root.querySelectorAll("path");
-        paths.forEach((path) => {
-          if (block.__origStroke != null) {
-            var orig = block.__origStroke;
-            try {
-              if (
-                typeof orig === "string" &&
-                /^#([0-9a-fA-F]{8})$/.test(orig)
-              ) {
-                orig = "#" + orig.substr(1, 6);
-              }
-            } catch (e) {}
-            path.setAttribute("stroke", orig);
-          } else {
-            path.removeAttribute("stroke");
-          }
+        const elems = root.querySelectorAll(
+          "path, rect, circle, ellipse, polygon, polyline, line"
+        );
+        elems.forEach((el) => {
+          try {
+            // Restore stroke color
+            if (block.__origStroke != null) {
+              let orig = block.__origStroke;
+              try {
+                if (
+                  typeof orig === "string" &&
+                  /^#([0-9a-fA-F]{8})$/.test(orig)
+                ) {
+                  orig = "#" + orig.substr(1, 6);
+                }
+              } catch (e) {}
+              el.setAttribute("stroke", orig);
+              el.style.stroke = orig;
+            } else {
+              el.removeAttribute("stroke");
+              el.style.stroke = "";
+            }
 
-          if (block.__origStrokeWidth != null) {
-            path.setAttribute("stroke-width", block.__origStrokeWidth);
-          } else {
-            path.removeAttribute("stroke-width");
-          }
+            // Restore stroke width
+            if (block.__origStrokeWidth != null) {
+              const w = block.__origStrokeWidth;
+              // Ensure it's a string without 'px'
+              const wStr = typeof w === "number" ? String(w) : String(w || "");
+              el.setAttribute("stroke-width", wStr);
+              el.style.strokeWidth = wStr;
+            } else {
+              el.removeAttribute("stroke-width");
+              el.style.strokeWidth = "";
+            }
 
-          if (block.__origStrokeOp != null) {
-            path.setAttribute("stroke-opacity", block.__origStrokeOp);
-          } else {
-            path.removeAttribute("stroke-opacity");
-          }
+            
+          } catch (e) {}
         });
       }
+    } catch (e) {}
 
+    // Remove saved originals
+    try {
       delete block.__origStroke;
+    } catch (e) {}
+    try {
       delete block.__origStrokeWidth;
+    } catch (e) {}
+    try {
       delete block.__origStrokeOp;
-    }
+    } catch (e) {}
 
+    // Restore duplicated colour if present
     if (
       Object.prototype.hasOwnProperty.call(block, "__dupOrigColour") &&
       block.__dupOrigColour != null &&
@@ -2303,7 +2425,9 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
         block.setColour(block.__dupOrigColour);
       } catch (e) {}
     }
-    delete block.__dupOrigColour;
+    try {
+      delete block.__dupOrigColour;
+    } catch (e) {}
   }
 
   function mixColors(color1, color2, amount) {
@@ -2605,7 +2729,7 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
   const MIN_DUP_SEQUENCE_LENGTH = 3;
   const MAX_DUP_SEQUENCE_LENGTH = 8;
   const MIN_DISTINCT_BLOCK_TYPES = 3;
-  const DUPLICATE_SEQUENCE_COLORS = ["#43c208", "#43c208"];
+  const DUPLICATE_SEQUENCE_COLORS = ["#43c208", "#0887c2"];
   const DUPLICATE_SEQUENCE_ANIMATION_INTERVAL_MS = 450;
   const DROPDOWN_PARAM_NAME_PREFIX = "Chemistry Object";
 
@@ -2649,6 +2773,10 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
 
   function ensureDuplicateHighlightAnimation(workspace) {
     if (!workspace) return;
+    // Only start the animation when the selected mode is 'animated'
+    try {
+      if (getDuplicateHighlightMode(workspace) !== "animated") return;
+    } catch (e) {}
     if (
       !workspace.__dupColoredBlocks ||
       workspace.__dupColoredBlocks.size === 0
@@ -2666,6 +2794,13 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     }
 
     workspace.__sequenceHighlightInterval = setInterval(() => {
+      // If user switched mode mid-animation, stop the interval
+      try {
+        if (getDuplicateHighlightMode(workspace) !== "animated") {
+          clearSequenceHighlights(workspace);
+          return;
+        }
+      } catch (e) {}
       if (
         !workspace.__dupColoredBlocks ||
         workspace.__dupColoredBlocks.size === 0
@@ -2739,13 +2874,26 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
       }
       visited.add(blockId);
 
-      if (
-        typeof block.getColour === "function" &&
-        typeof block.setColour === "function"
-      ) {
-        applyDuplicateColour(block, workspace);
-      }
-      workspace.__dupColoredBlocks.add(block);
+      const mode = getDuplicateHighlightMode(workspace);
+      try {
+        if (mode === "border") {
+          // Apply border glow to the block tree
+          try {
+            applyBorderGlow(block);
+          } catch (e) {}
+          workspace.__dupColoredBlocks.add(block);
+        } else {
+          // 'colour' and 'animated' both use the colour-applier; animation
+          // routine will only run when mode === 'animated'.
+          if (
+            typeof block.getColour === "function" &&
+            typeof block.setColour === "function"
+          ) {
+            applyDuplicateColour(block, workspace);
+          }
+          workspace.__dupColoredBlocks.add(block);
+        }
+      } catch (e) {}
 
       if (Array.isArray(block.inputList)) {
         block.inputList.forEach((input) => {
@@ -2764,7 +2912,11 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
     }
 
     group.forEach((blk) => tintBlockTree(blk));
-    ensureDuplicateHighlightAnimation(workspace);
+    try {
+      if (getDuplicateHighlightMode(workspace) === "animated") {
+        ensureDuplicateHighlightAnimation(workspace);
+      }
+    } catch (e) {}
   }
 
   function highlightOnlyFunctionCandidates(workspace, startBlock, SEQ_LEN = 3) {
@@ -3282,6 +3434,10 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
         newRunBrick(workspace);
       });
     }
+    // Initialize the duplicate highlight mode selector UI (non-blocking)
+    try {
+      initDuplicateHighlightModeSelector(workspace);
+    } catch (e) {}
   }
 
   // add eventlistener for restart button
@@ -3982,6 +4138,18 @@ if (typeof Blockly !== "undefined" && Blockly.Blocks && !Blockly.Blocks["naoActi
       typeof applyBorderGlow !== "undefined" ? applyBorderGlow : null,
     removeBorderGlow:
       typeof removeBorderGlow !== "undefined" ? removeBorderGlow : null,
+    getDuplicateHighlightMode:
+      typeof getDuplicateHighlightMode !== "undefined"
+        ? getDuplicateHighlightMode
+        : null,
+    setDuplicateHighlightMode:
+      typeof setDuplicateHighlightMode !== "undefined"
+        ? setDuplicateHighlightMode
+        : null,
+    initDuplicateHighlightModeSelector:
+      typeof initDuplicateHighlightModeSelector !== "undefined"
+        ? initDuplicateHighlightModeSelector
+        : null,
     highlightOnlyFunctionCandidates:
       typeof highlightOnlyFunctionCandidates !== "undefined"
         ? highlightOnlyFunctionCandidates
