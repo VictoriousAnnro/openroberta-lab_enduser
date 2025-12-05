@@ -39663,7 +39663,7 @@ Blockly.Blocks.naoActions_mixSolution = {
   init: function () {
     this.setColour(Blockly.CAT_ACTION_RGB);
     this.setInputsInline(!0);
-    this.appendDummyInput().appendField("mix reagents at stir pad");
+    this.appendDummyInput().appendField("mix chemistry ingredients");
     this.setPreviousStatement(!0);
     this.setNextStatement(!0);
     this.setTooltip(
@@ -39675,7 +39675,7 @@ Blockly.Blocks.naoActions_analyzeSolution = {
   init: function () {
     this.setColour(Blockly.CAT_ACTION_RGB);
     this.setInputsInline(!0);
-    this.appendDummyInput().appendField("analyze sample on scale pad");
+    this.appendDummyInput().appendField("analyze sample");
     this.setPreviousStatement(!0);
     this.setNextStatement(!0);
     this.setTooltip(
