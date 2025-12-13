@@ -9,7 +9,6 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-
   var customFunctionRegistry = {};
   var structuralFunctionRegistry = {};
   var promptedSignatures = new Set();
@@ -1403,8 +1402,68 @@
         // This forces the block to process the args and draw the rows.
         def.domToMutation(mutationElement);
 
+        // Debug: Log the mutation to verify it has parameters
+        console.log(
+          "DEBUG: Created procedure definition mutation:",
+          mutationElement.outerHTML
+        );
+        console.log("DEBUG: Procedure name:", functionName);
+        console.log("DEBUG: Number of parameters:", literalParams.length);
+
+        // CRITICAL FIX: OpenRoberta's domToMutation processes args but doesn't store them
+        // We need to manually set the arguments_ array on the block
+        if (!def.arguments_) {
+          def.arguments_ = [];
+        }
+        if (!def.paramTypes_) {
+          def.paramTypes_ = [];
+        }
+
+        // Clear and rebuild the arguments arrays
+        def.arguments_.length = 0;
+        def.paramTypes_.length = 0;
+
+        literalParams.forEach((p) => {
+          def.arguments_.push(p.paramName);
+          const type =
+            p.type.charAt(0).toUpperCase() + p.type.slice(1).toLowerCase();
+          def.paramTypes_.push(type);
+        });
+
+        console.log("DEBUG: Set def.arguments_ to:", def.arguments_);
+        console.log("DEBUG: Set def.paramTypes_ to:", def.paramTypes_);
+
+        // CRITICAL: Override mutationToDom to return our mutation with parameters
+        // Store the original mutation XML so it can be retrieved later
+        def.__customMutation = mutationElement.cloneNode(true);
+
+        // Override the mutationToDom method to return our stored mutation
+        const originalMutationToDom = def.mutationToDom;
+        def.mutationToDom = function () {
+          if (this.__customMutation) {
+            console.log(
+              "DEBUG: Returning custom mutation with",
+              this.arguments_.length,
+              "parameters"
+            );
+            return this.__customMutation.cloneNode(true);
+          }
+          return originalMutationToDom
+            ? originalMutationToDom.call(this)
+            : null;
+        };
+
         // Ensure the declaration blocks reflect the detected names and types.
         syncParameterDeclarations(def, literalParams, targetWs);
+      }
+
+      // Debug: Check what the block's mutation looks like after setup
+      if (def.mutationToDom) {
+        const finalMutation = def.mutationToDom();
+        console.log(
+          "DEBUG: Final procedure mutation:",
+          finalMutation ? finalMutation.outerHTML : "null"
+        );
       }
 
       refreshProcedureCallers(def);
@@ -1521,6 +1580,171 @@
             note.remove();
           } catch (e) {}
         }, 6000);
+
+        // CRITICAL FIX: Override Blockly.Procedures.flyoutCategory to ensure mutations are applied
+        if (
+          typeof Blockly !== "undefined" &&
+          Blockly.Procedures &&
+          !Blockly.Procedures.__orOverridden
+        ) {
+          const originalFlyoutCategory = Blockly.Procedures.flyoutCategory;
+          Blockly.Procedures.flyoutCategory = function (workspace) {
+            console.log("DEBUG: flyoutCategory called");
+            const xmlList = originalFlyoutCategory.call(this, workspace);
+
+            console.log(
+              "DEBUG: xmlList type:",
+              typeof xmlList,
+              "isArray:",
+              Array.isArray(xmlList)
+            );
+            console.log(
+              "DEBUG: xmlList length:",
+              xmlList ? xmlList.length : "null"
+            );
+
+            // Find all procedure caller blocks in the XML and ensure they have mutations
+            if (xmlList && Array.isArray(xmlList)) {
+              for (let i = 0; i < xmlList.length; i++) {
+                const item = xmlList[i];
+                const blockType =
+                  item && item.getAttribute ? item.getAttribute("type") : null;
+                console.log(
+                  "DEBUG: Item",
+                  i,
+                  "tagName:",
+                  item?.tagName,
+                  "blockType:",
+                  blockType
+                );
+
+                if (
+                  item &&
+                  (item.tagName === "block" || item.tagName === "BLOCK") &&
+                  blockType === "robProcedures_callnoreturn"
+                ) {
+                  // Try different ways to get the procedure name
+                  let procName = null;
+                  const nameField =
+                    item.querySelector('field[name="NAME"]') ||
+                    item.querySelector('FIELD[name="NAME"]');
+                  if (nameField) {
+                    procName = nameField.textContent || nameField.innerText;
+                  }
+
+                  // If no field found, check mutation name attribute
+                  if (!procName) {
+                    const mutation =
+                      item.querySelector("mutation") ||
+                      item.querySelector("MUTATION");
+                    if (mutation) {
+                      procName = mutation.getAttribute("name");
+                    }
+                  }
+
+                  console.log("DEBUG: Processing flyout caller for:", procName);
+
+                  if (procName) {
+                    // Find the definition block
+                    const allBlocks = workspace.getAllBlocks(false);
+                    const defBlock = allBlocks.find(
+                      (b) =>
+                        b.type === "robProcedures_defnoreturn" &&
+                        b.getFieldValue("NAME") === procName
+                    );
+
+                    if (defBlock && defBlock.__customMutation) {
+                      console.log(
+                        "DEBUG: Found definition for",
+                        procName,
+                        "- Adding mutation to flyout XML:",
+                        defBlock.__customMutation.outerHTML
+                      );
+                      // Check if mutation already exists
+                      let mutation =
+                        item.querySelector("mutation") ||
+                        item.querySelector("MUTATION");
+                      if (mutation) {
+                        mutation.parentNode.removeChild(mutation);
+                      }
+                      // Add our custom mutation and ensure it has the name attribute
+                      const clonedMutation =
+                        defBlock.__customMutation.cloneNode(true);
+                      clonedMutation.setAttribute("name", procName);
+                      item.insertBefore(clonedMutation, item.firstChild);
+                      console.log(
+                        "DEBUG: Mutation successfully added to flyout block with name:",
+                        procName
+                      );
+                    } else {
+                      console.log(
+                        "DEBUG: No definition found for",
+                        procName,
+                        "with __customMutation"
+                      );
+                    }
+                  }
+                }
+              }
+            }
+
+            return xmlList;
+          };
+          Blockly.Procedures.__orOverridden = true;
+          console.log("DEBUG: Overrode Blockly.Procedures.flyoutCategory");
+        }
+
+        // Force toolbox refresh after all procedure blocks are created
+        // This ensures the Functions category shows caller blocks with parameters
+        try {
+          if (
+            sourceWorkspace &&
+            typeof sourceWorkspace.updateToolbox === "function"
+          ) {
+            sourceWorkspace.updateToolbox(sourceWorkspace.options.languageTree);
+          } else if (
+            typeof Blockly !== "undefined" &&
+            Blockly.getMainWorkspace
+          ) {
+            const mainWs = Blockly.getMainWorkspace();
+            if (mainWs && typeof mainWs.updateToolbox === "function") {
+              mainWs.updateToolbox(mainWs.options.languageTree);
+            }
+          }
+
+          // Also try to refresh the flyout if it's currently showing the Functions category
+          if (
+            sourceWorkspace &&
+            sourceWorkspace.toolbox_ &&
+            sourceWorkspace.toolbox_.flyout_
+          ) {
+            const flyout = sourceWorkspace.toolbox_.flyout_;
+            if (
+              flyout &&
+              typeof flyout.hide === "function" &&
+              typeof flyout.show === "function"
+            ) {
+              // Quick hide/show to force flyout regeneration
+              const currentSelection = sourceWorkspace.toolbox_.selectedItem_;
+              if (
+                currentSelection &&
+                currentSelection.id_ &&
+                (currentSelection.id_ === "catProcedure" ||
+                  currentSelection.id_.indexOf("Procedure") >= 0)
+              ) {
+                setTimeout(() => {
+                  try {
+                    sourceWorkspace.toolbox_.refreshSelection();
+                  } catch (refreshErr) {
+                    console.log("Could not call refreshSelection:", refreshErr);
+                  }
+                }, 100);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not refresh toolbox/flyout:", e);
+        }
       } catch (e) {}
     } catch (e) {
       console.error("Error creating custom block:", e);
@@ -1665,6 +1889,28 @@
       if (root) {
         root.style.display = "none";
         root.style.pointerEvents = "none";
+      }
+
+      // Copy the custom mutation override from the original definition block
+      if (defBlock.__customMutation) {
+        hiddenBlock.__customMutation =
+          defBlock.__customMutation.cloneNode(true);
+        hiddenBlock.arguments_ = defBlock.arguments_
+          ? defBlock.arguments_.slice()
+          : [];
+        hiddenBlock.paramTypes_ = defBlock.paramTypes_
+          ? defBlock.paramTypes_.slice()
+          : [];
+
+        const originalMutationToDom = hiddenBlock.mutationToDom;
+        hiddenBlock.mutationToDom = function () {
+          if (this.__customMutation) {
+            return this.__customMutation.cloneNode(true);
+          }
+          return originalMutationToDom
+            ? originalMutationToDom.call(this)
+            : null;
+        };
       }
 
       refreshProcedureCallers(hiddenBlock);
@@ -2099,6 +2345,35 @@
   }
 
   function showToastPromptImpl(message, onConfirm, onCancel) {
+    // Create modal overlay to block all interactions
+    const overlay = document.createElement("div");
+    overlay.className = "toast-modal-overlay";
+    overlay.style.position = "fixed";
+    overlay.style.top = "0";
+    overlay.style.left = "0";
+    overlay.style.width = "100%";
+    overlay.style.height = "100%";
+    overlay.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+    overlay.style.zIndex = "19999";
+    overlay.style.display = "flex";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+    overlay.style.cursor = "not-allowed";
+
+    // Prevent all events on the overlay
+    overlay.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    overlay.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    overlay.addEventListener("keydown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
     const toast = document.createElement("div");
     toast.className = "toast-prompt";
     // ensure it's visible regardless of existing CSS
@@ -2114,6 +2389,7 @@
     toast.style.fontFamily = "Arial, sans-serif";
     toast.style.maxWidth = "320px";
     toast.style.animation = "fadeIn .3s ease";
+    toast.style.cursor = "default";
     toast.innerHTML = `
     <div class="toast-message" style="margin-bottom:8px">${message}</div>
     <div class="toast-buttons" style="margin-top: 10px;
@@ -2131,6 +2407,7 @@
     </div>
   `;
     console.log("showToastPrompt: creating toast");
+    document.body.appendChild(overlay);
     document.body.appendChild(toast);
 
     const okBtn = toast.querySelector(".toast-ok");
@@ -2140,6 +2417,7 @@
       okBtn.addEventListener("click", function () {
         try {
           console.log("showToastPrompt: OK clicked");
+          overlay.remove();
           toast.remove();
         } catch (e) {}
         try {
@@ -2154,6 +2432,7 @@
       cancelBtn.addEventListener("click", function () {
         try {
           console.log("showToastPrompt: Cancel clicked");
+          overlay.remove();
           toast.remove();
         } catch (e) {}
         try {
@@ -2359,8 +2638,6 @@
               el.removeAttribute("stroke-width");
               el.style.strokeWidth = "";
             }
-
-            
           } catch (e) {}
         });
       }
@@ -3480,9 +3757,10 @@
     await getCall(apiUrl + "/viewer").then((_) => {});
 
     let xmlProgram = Blockly.Xml.workspaceToDom(workspace);
-    let xmlTextProgram = Blockly.Xml.domToText(xmlProgram); //delete later
-    //console.info("xmlProgram: ", xmlProgram);
-    //console.info("xmlProgram: ", xmlProgram);
+    let xmlTextProgram = Blockly.Xml.domToText(xmlProgram);
+    console.info("=== FULL XML PROGRAM ===");
+    console.info(xmlTextProgram);
+    console.info("=== END XML ===");
 
     //get all block-elements
     let blockElems = xmlProgram.getElementsByTagName("block");
@@ -3525,10 +3803,139 @@
     //gets blocks, puts in queue (array) and/or map depending on procedure or not
     let blockStack = [];
     let fallbackStack = [];
+    let nestedBlockIds = new Set(); // Track blocks that are nested inside control structures
     procedureMap = new Map(); //reset global map
+
+    console.log(
+      "=== QUEUEBLOCKS DEBUG: Total blocks from XML:",
+      blockElems.length
+    );
+
+    // First pass: identify all nested blocks (blocks inside statement inputs, value inputs, or next chains)
+    for (let index = 0; index < blockElems.length; index++) {
+      const element = blockElems[index];
+      const elemType = element.getAttribute && element.getAttribute("type");
+      const elemId = element.getAttribute && element.getAttribute("id");
+
+      // Find all statement elements (DO, ELSE, etc.) in this block
+      // For OpenRoberta if/else blocks, statements are inside a <repetitions> wrapper
+      let statements = getDirectChildElements(element, "statement");
+
+      // Check for OpenRoberta's <repetitions> wrapper
+      const repetitionsNode = findFirstChildElement(element, "repetitions");
+      if (repetitionsNode && statements.length === 0) {
+        statements = getDirectChildElements(repetitionsNode, "statement");
+        console.log(
+          `Block ${index}: ${elemType} [${elemId}] has ${statements.length} statement(s) [in repetitions wrapper]`
+        );
+      } else {
+        console.log(
+          `Block ${index}: ${elemType} [${elemId}] has ${statements.length} statement(s)`
+        );
+      }
+
+      // For if/else blocks, show detailed XML structure to diagnose the issue
+      if (
+        elemType &&
+        (elemType.includes("_if") || elemType.includes("ifElse"))
+      ) {
+        console.log("  ==> IF/ELSE BLOCK - Checking all child elements:");
+        for (let i = 0; i < element.childNodes.length; i++) {
+          const child = element.childNodes[i];
+          if (child.nodeType === 1) {
+            const childTag = child.tagName;
+            const childName = child.getAttribute && child.getAttribute("name");
+            console.log(
+              `     - <${childTag}${childName ? ` name="${childName}"` : ""}>`
+            );
+          }
+        }
+      }
+
+      statements.forEach((stmt) => {
+        const stmtName = stmt.getAttribute && stmt.getAttribute("name");
+        console.log(`  -> Statement: ${stmtName}`);
+
+        // Debug: check what's in the statement element
+        const firstBlock = getFirstChildBlock(stmt);
+        if (firstBlock) {
+          const firstType =
+            firstBlock.getAttribute && firstBlock.getAttribute("type");
+          const firstId =
+            firstBlock.getAttribute && firstBlock.getAttribute("id");
+          console.log(
+            `     First block in statement: ${firstType} [${firstId}]`
+          );
+
+          // Check if it has a next
+          const nextNode = findFirstChildElement(firstBlock, "next");
+          console.log(`     First block has next: ${!!nextNode}`);
+        }
+
+        // Collect all blocks within this statement (these are nested)
+        const nested = collectBlocksFromStatement(stmt);
+        console.log(`     Found ${nested.length} nested blocks in ${stmtName}`);
+        nested.forEach((nestedBlock, idx) => {
+          const id = nestedBlock.getAttribute && nestedBlock.getAttribute("id");
+          const type =
+            nestedBlock.getAttribute && nestedBlock.getAttribute("type");
+          if (id) {
+            nestedBlockIds.add(id);
+            console.log(`     -> Marking as nested [${idx}]: ${type} [${id}]`);
+          }
+        });
+      });
+
+      // Also mark blocks inside value inputs as nested (these are condition/parameter blocks)
+      let values = getDirectChildElements(element, "value");
+
+      // For OpenRoberta if/else blocks, also check inside <repetitions> wrapper
+      if (repetitionsNode) {
+        const repValues = getDirectChildElements(repetitionsNode, "value");
+        values = values.concat(repValues);
+      }
+
+      values.forEach((val) => {
+        const valName = val.getAttribute && val.getAttribute("name");
+        const valBlocks = getDirectChildElements(val, "block");
+        valBlocks.forEach((valBlock) => {
+          const id = valBlock.getAttribute && valBlock.getAttribute("id");
+          const type = valBlock.getAttribute && valBlock.getAttribute("type");
+          if (id) {
+            nestedBlockIds.add(id);
+            console.log(
+              `     -> Marking value block as nested (in ${valName}): ${type} [${id}]`
+            );
+          }
+        });
+      });
+
+      // Mark all blocks in the 'next' chain as nested (they'll be executed via the chain traversal)
+      const nextNode = findFirstChildElement(element, "next");
+      if (nextNode) {
+        let currentNext = getFirstChildBlock(nextNode);
+        while (currentNext) {
+          const id = currentNext.getAttribute && currentNext.getAttribute("id");
+          const type =
+            currentNext.getAttribute && currentNext.getAttribute("type");
+          if (id) {
+            nestedBlockIds.add(id);
+            console.log(
+              `     -> Marking next-chain block as nested: ${type} [${id}]`
+            );
+          }
+          currentNext = getNextBlockElement(currentNext);
+        }
+      }
+    }
+
+    console.log("=== Total nested blocks identified:", nestedBlockIds.size);
+
+    // Second pass: build the execution queue, skipping nested blocks
     for (let index = 0; index < blockElems.length; index++) {
       const element = blockElems[index];
       let type = element.getAttribute("type");
+      const blockId = element.getAttribute && element.getAttribute("id");
 
       if (
         type == "procedures_defnoreturn" ||
@@ -3551,17 +3958,42 @@
         // Record blocks that belong to the main program starting at the start block
         if (type === "robControls_start") {
           const startStatement = findStatementElement(element, "ST");
-          blockStack = blockStack.concat(
-            collectBlocksFromStatement(startStatement)
+          const startBlocks = collectBlocksFromStatement(startStatement);
+          console.log(
+            "=== Found START block, collected chain:",
+            startBlocks.length,
+            "blocks"
           );
+          blockStack = blockStack.concat(startBlocks);
         }
-        fallbackStack.push(element);
+        // Only add to fallback if this block is NOT nested inside a control structure
+        if (!nestedBlockIds.has(blockId)) {
+          fallbackStack.push(element);
+          console.log(`  -> Adding to fallback: ${type} [${blockId}]`);
+        } else {
+          console.log(`  -> SKIPPING (nested): ${type} [${blockId}]`);
+        }
       }
     }
+
+    console.log("=== blockStack length:", blockStack.length);
+    console.log("=== fallbackStack length:", fallbackStack.length);
+
     if (blockStack.length === 0) {
       // Fallback to previous behaviour if no start block chain was found
+      console.log("=== Using fallback stack");
       blockStack = fallbackStack;
+    } else {
+      console.log("=== Using start block stack");
     }
+
+    console.log("=== FINAL QUEUE:");
+    blockStack.forEach((blk, i) => {
+      const t = blk.getAttribute && blk.getAttribute("type");
+      const id = blk.getAttribute && blk.getAttribute("id");
+      console.log(`  ${i}: ${t} [${id}]`);
+    });
+
     return blockStack;
   }
 
@@ -3618,14 +4050,38 @@
   }
 
   function findValueElement(blockElement, name) {
-    const values = getDirectChildElements(blockElement, "value");
+    let values = getDirectChildElements(blockElement, "value");
+
+    // For OpenRoberta if/else blocks, check inside <repetitions> wrapper
+    if (values.length === 0) {
+      const repetitionsNode = findFirstChildElement(
+        blockElement,
+        "repetitions"
+      );
+      if (repetitionsNode) {
+        values = getDirectChildElements(repetitionsNode, "value");
+      }
+    }
+
     return values.find(
       (v) => (v.getAttribute && v.getAttribute("name")) === name
     );
   }
 
   function findStatementElement(blockElement, name) {
-    const statements = getDirectChildElements(blockElement, "statement");
+    let statements = getDirectChildElements(blockElement, "statement");
+
+    // For OpenRoberta if/else blocks, check inside <repetitions> wrapper
+    if (statements.length === 0) {
+      const repetitionsNode = findFirstChildElement(
+        blockElement,
+        "repetitions"
+      );
+      if (repetitionsNode) {
+        statements = getDirectChildElements(repetitionsNode, "statement");
+      }
+    }
+
     return statements.find(
       (s) => (s.getAttribute && s.getAttribute("name")) === name
     );
@@ -3636,11 +4092,22 @@
     if (!statementElement) {
       return sequence;
     }
-    let current = getFirstChildBlock(statementElement);
-    while (current) {
-      sequence.push(current);
-      current = getNextBlockElement(current);
+
+    // OpenRoberta can have blocks as direct children of statement (siblings)
+    // OR connected via <next> chains. Handle both cases.
+    const directBlocks = getDirectChildElements(statementElement, "block");
+    if (directBlocks.length > 0) {
+      // OpenRoberta style: blocks are siblings under statement
+      directBlocks.forEach((block) => sequence.push(block));
+    } else {
+      // Standard Blockly style: blocks connected via <next>
+      let current = getFirstChildBlock(statementElement);
+      while (current) {
+        sequence.push(current);
+        current = getNextBlockElement(current);
+      }
     }
+
     return sequence;
   }
 
@@ -3903,31 +4370,21 @@
   }
 
   async function blockAPICalls(apiUrl, blockElements) {
+    console.log(
+      "=== BLOCKAPI CALLS: Processing",
+      blockElements.length,
+      "blocks"
+    );
     for (let index = 0; index < blockElements.length; index++) {
       const element = blockElements[index];
+      const blockType = element.getAttribute("type");
+      const blockId = element.getAttribute && element.getAttribute("id");
+      console.log(`  -> Executing block ${index}: ${blockType} [${blockId}]`);
 
       let url = "";
       let obj;
       //rn everything is just GET. Maybe POST is more correct but if it works why bother
-      switch (element.getAttribute("type")) {
-        case "controls_if":
-        case "robControls_if":
-        case "robControls_ifElse": {
-          const conditionValue = findValueElement(element, "IF0");
-          const shouldRun = await evaluateValueBlock(apiUrl, conditionValue);
-          if (toBoolean(shouldRun)) {
-            const doStatement = findStatementElement(element, "DO0");
-            const doBlocks = collectBlocksFromStatement(doStatement);
-            await blockAPICalls(apiUrl, doBlocks);
-          } else {
-            const elseStatement = findStatementElement(element, "ELSE");
-            if (elseStatement) {
-              const elseBlocks = collectBlocksFromStatement(elseStatement);
-              await blockAPICalls(apiUrl, elseBlocks);
-            }
-          }
-          continue;
-        }
+      switch (blockType) {
         case "controls_repeat_ext":
         case "controls_repeat":
         case "robControls_repeat": {
@@ -4028,6 +4485,70 @@
             await executeProcedureCall(apiUrl, element, procedureName);
           }
           continue;
+        case "controls_if":
+        case "robControls_if":
+        case "robControls_ifElse": {
+          console.log("  ==> IF/ELSE block detected");
+          // Support multi-branch if/elseif/else, and ensure ONLY one branch runs.
+          // Blockly stores branches as IF0/DO0, IF1/DO1, ... plus optional ELSE.
+          let branchExecuted = false;
+
+          // If this if/else block has no DO/ELSE statements at all, treat as no-op.
+          const hasAnyDoOrElse =
+            !!findStatementElement(element, "DO0") ||
+            !!findStatementElement(element, "ELSE") ||
+            !!findStatementElement(element, "DO1");
+          if (!hasAnyDoOrElse) {
+            console.log("  ==> No DO/ELSE statements, skipping");
+            continue;
+          }
+
+          try {
+            let idx = 0;
+            // Iterate all IFx/DOx pairs until one condition succeeds
+            while (true) {
+              const cond = findValueElement(element, "IF" + idx);
+              const doStmt = findStatementElement(element, "DO" + idx);
+              if (!cond && !doStmt) {
+                console.log(`  ==> No more IF/DO branches at index ${idx}`);
+                break; // no more branches
+              }
+              const shouldRun = await evaluateValueBlock(apiUrl, cond);
+              console.log(`  ==> IF${idx} evaluated to: ${shouldRun}`);
+              if (toBoolean(shouldRun)) {
+                const doBlocks = collectBlocksFromStatement(doStmt);
+                console.log(
+                  `  ==> Executing DO${idx} branch with ${doBlocks.length} blocks`
+                );
+                await blockAPICalls(apiUrl, doBlocks);
+                branchExecuted = true;
+                break; // stop after first true branch
+              }
+              idx += 1;
+            }
+
+            // If no IF/ELSEIF matched, run ELSE (if present)
+            if (!branchExecuted) {
+              console.log("  ==> No IF branch matched, checking ELSE");
+              const elseStmt = findStatementElement(element, "ELSE");
+              if (elseStmt) {
+                const elseBlocks = collectBlocksFromStatement(elseStmt);
+                console.log(
+                  `  ==> Executing ELSE branch with ${elseBlocks.length} blocks`
+                );
+                await blockAPICalls(apiUrl, elseBlocks);
+              } else {
+                console.log("  ==> No ELSE branch found");
+              }
+            }
+          } catch (e) {
+            console.warn("blockAPICalls if/else handling failed", e);
+          }
+          console.log(
+            "  ==> IF/ELSE block completed, continuing to next block"
+          );
+          continue;
+        }
       }
     }
     return true;
@@ -4133,4 +4654,3 @@
         : null,
   };
 });
-

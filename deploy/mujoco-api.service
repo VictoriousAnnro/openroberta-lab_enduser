@@ -1,0 +1,28 @@
+[Unit]
+Description=MuJoCo Flask API Server
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/openroberta/mj_pick_and_place
+
+# Use the virtual environment
+Environment="PATH=/opt/openroberta/mj_pick_and_place/venv/bin:/usr/bin:/usr/local/bin"
+Environment="FLASK_APP=app.py"
+Environment="FLASK_ENV=production"
+
+# Start Flask on all interfaces so Nginx can proxy to it
+ExecStart=/opt/openroberta/mj_pick_and_place/venv/bin/flask run --host=0.0.0.0 --port=5000
+
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mujoco-api
+
+[Install]
+WantedBy=multi-user.target

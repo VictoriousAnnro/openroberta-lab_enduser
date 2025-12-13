@@ -39959,6 +39959,37 @@ Blockly.Blocks.naoActions_forgetFace = {
     this.setTooltip(Blockly.Msg.NAO_FORGETFACE_TOOLTIP);
   },
 };
+Blockly.Blocks.naoActions_selectAllObjects = {
+  init: function () {
+    this.setColour(210);
+    var a = new Blockly.FieldDropdown([
+      ["methanol cylinder", "nitrogen_tool"],
+      ["chloroform syringe", "chloroform_syringe"],
+      ["toluene syringe", "toluene_syringe"],
+      ["methanol cylinder slot", "nitrogen_slot"],
+      ["chloroform syringe slot", "chloroform_slot"],
+      ["toluene syringe slot", "toluene_slot"],
+      ["mix cylinder", "mix_station"],
+      ["analysis pad", "analysis_pad"],
+    ]);
+    this.appendDummyInput().appendField(a, "OBJECT");
+    this.setOutput(!0, "String");
+    this.setTooltip("Select an object from all available chemistry objects.");
+  },
+};
+Blockly.Blocks.naoActions_selectToolObjects = {
+  init: function () {
+    this.setColour(210);
+    var a = new Blockly.FieldDropdown([
+      ["methanol cylinder", "nitrogen_tool"],
+      ["chloroform syringe", "chloroform_syringe"],
+      ["toluene syringe", "toluene_syringe"],
+    ]);
+    this.appendDummyInput().appendField(a, "OBJECT");
+    this.setOutput(!0, "String");
+    this.setTooltip("Select a tool from available chemistry tools.");
+  },
+};
 Blockly.Blocks.naoBrick = {};
 Blockly.Blocks["naoBrick_NAO-Brick"] = {
   init: function () {
